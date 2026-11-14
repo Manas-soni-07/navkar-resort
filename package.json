@@ -1,0 +1,18 @@
+{
+  "name": "resortos",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "pnpm@12.18.0",
+  "scripts": {
+    "start:mobile": "pnpm --filter mobile start",
+    "dev:mobile": "pnpm --filter mobile start",
+    "dev:api": "pnpm --filter api dev",
+    "build:api": "pnpm --filter api build",
+    "start:api": "pnpm --filter api start",
+    "typecheck": "pnpm -r --parallel typecheck",
+    "lint": "pnpm -r --parallel lint"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}

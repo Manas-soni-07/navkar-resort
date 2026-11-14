@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Next.js
+apps/api/.next/
+apps/api/out/
+
+# Expo / React Native
+apps/mobile/.expo/
+apps/mobile/web-build/
+apps/mobile/android/
+apps/mobile/ios/
+
+# Production build outputs
+dist/
+build/
+
+# Environment variables
+.env
+.env*.local
+!.env.example
+!apps/*/.env.example
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.log
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Prisma local SQLite or temp files
+*.db
+*.db-journal
