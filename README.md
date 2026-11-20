@@ -97,7 +97,11 @@ If the phone cannot reach the API, allow Node.js through Windows Firewall on pri
 
 ### Build an installable APK (Android)
 
-The API URL is baked into the APK at build time from `apps/mobile/.env` (`EXPO_PUBLIC_API_URL`).
+The API URL is baked into the APK at build time. Release builds read `apps/mobile/.env.production`
+(`EXPO_PUBLIC_API_URL=https://navkar-resort.vercel.app/api`); `apps/mobile/.env` is only for Expo Go development.
+After changing the URL, clear the bundler cache or the old URL is reused:
+`Remove-Item -Recurse -Force $env:TEMP\metro-cache, apps\mobile\android\app\build\generated`.
+Bump `expo.version` and `expo.android.versionCode` in `app.json` for every APK you hand out, so it installs as an update.
 
 ```powershell
 cd apps/mobile
@@ -111,8 +115,17 @@ cd android; .\gradlew.bat assembleRelease
 ```
 
 Notes: do not set `JAVA_TOOL_OPTIONS` (its stderr notice breaks the native C++ step); the APK is signed with
-the debug key, fine for sideloading but not for the Play Store; `usesCleartextTraffic` is enabled so the APK
-can reach an `http://` LAN API. Turn it off once the API is on HTTPS.
+the debug key in `apps/mobile/android/app/debug.keystore`, fine for sideloading but not for the Play Store (keep that
+file: APKs signed with a different key cannot update an installed copy); release builds are HTTPS-only
+(`usesCleartextTraffic: false`).
+
+### Production API (Vercel)
+
+- URL: `https://navkar-resort.vercel.app/api` (health: `/api/health` should report `"database":{"status":"connected"}`)
+- Project root directory `apps/api`; `apps/api/vercel.json` installs only the API's packages (React 19) and runs
+  functions in Tokyo (`hnd1`), next to the TiDB cluster.
+- Environment variables: `DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, entered **without quotes**.
+  Changing them requires a redeploy.
 
 ---
 

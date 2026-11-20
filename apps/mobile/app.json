@@ -2,7 +2,7 @@
   "expo": {
     "name": "ResortOS",
     "slug": "resortos",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "resortos",
@@ -22,7 +22,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F8F9FA"
       },
-      "package": "com.resortos.app"
+      "package": "com.resortos.app",
+      "versionCode": 2
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -35,7 +36,7 @@
         "expo-build-properties",
         {
           "android": {
-            "usesCleartextTraffic": true
+            "usesCleartextTraffic": false
           }
         }
       ]
