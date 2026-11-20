@@ -1,13 +1,16 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { comparePassword, generateToken, formatUserProfile } from '@/lib/auth';
-import { successResponse, errorResponse } from '@/lib/api-response';
-import type { AuthSession } from '@resortos/shared';
+import { comparePassword, generateToken, formatUserProfile, isAdminRole } from '@/lib/auth';
+import { successResponse, errorResponse, handleRouteError } from '@/lib/api-response';
+import type { AuthSession, UserRole } from '@resortos/shared';
 
 const loginSchema = z.object({
   email: z.string().email('Valid email address required'),
   password: z.string().min(1, 'Password is required'),
+  // Portal chosen on the shared login screen. Only used to reject a mismatch —
+  // the account's real role always comes from the database.
+  role: z.enum(['ADMIN', 'MANAGER']).optional(),
 });
 
 export const dynamic = 'force-dynamic';
@@ -26,7 +29,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { email, password } = parsed.data;
+    const { email, password, role: selectedPortal } = parsed.data;
 
     const user = await prisma.user.findUnique({
       where: { email: email.toLowerCase().trim() },
@@ -37,7 +40,8 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    if (!user) {
+    // Compare the password before revealing anything about the account's state.
+    if (!user || !(await comparePassword(password, user.passwordHash))) {
       return errorResponse('INVALID_CREDENTIALS', 'Invalid email or password combination', 401);
     }
 
@@ -45,18 +49,28 @@ export async function POST(req: NextRequest) {
       return errorResponse('ACCOUNT_INACTIVE', 'This user account is suspended or inactive', 403);
     }
 
-    const isMatch = await comparePassword(password, user.passwordHash);
-    if (!isMatch) {
-      return errorResponse('INVALID_CREDENTIALS', 'Invalid email or password combination', 401);
+    const accountIsAdmin = isAdminRole(user.role);
+    if (selectedPortal && (selectedPortal === 'ADMIN') !== accountIsAdmin) {
+      return errorResponse(
+        'ROLE_MISMATCH',
+        `This account cannot sign in to the ${selectedPortal === 'ADMIN' ? 'Admin' : 'Manager'} portal`,
+        403
+      );
     }
 
-    // Update lastLoginAt
+    if (!accountIsAdmin && !user.hotelId) {
+      return errorResponse(
+        'NO_HOTEL_ASSIGNED',
+        'This account is not assigned to a hotel. Contact your administrator.',
+        403
+      );
+    }
+
     await prisma.user.update({
       where: { id: user.id },
       data: { lastLoginAt: new Date() },
     });
 
-    // Create Audit Log
     await prisma.auditLog.create({
       data: {
         hotelId: user.hotelId,
@@ -64,29 +78,27 @@ export async function POST(req: NextRequest) {
         action: 'LOGIN',
         entityType: 'USER',
         entityId: user.id,
-        details: JSON.stringify({ ip: req.headers.get('x-forwarded-for') ?? 'local' }),
+        ipAddress: req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? null,
+        userAgent: req.headers.get('user-agent'),
       },
     });
 
-    const token = await generateToken({
+    const { token, expiresAt } = await generateToken({
       userId: user.id,
       email: user.email,
-      role: user.role,
+      role: user.role as UserRole,
       hotelId: user.hotelId,
       organizationId: user.organizationId,
     });
 
-    const userProfile = formatUserProfile(user);
-
     const sessionData: AuthSession = {
-      user: userProfile,
+      user: formatUserProfile(user),
       token,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt,
     };
 
     return successResponse(sessionData, 'Authentication successful', 200);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Internal authentication error';
-    return errorResponse('INTERNAL_ERROR', message, 500);
+    return handleRouteError(err, 'INTERNAL_ERROR', 'Authentication failed');
   }
 }

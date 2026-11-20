@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, RefreshControl } from 'react-native';
-import { useRouter } from 'expo-router';
 import {
   ShieldAlert,
   Building,
@@ -17,9 +16,18 @@ import { colors, spacing, typography, borderRadius } from '@/theme';
 import { useAuth } from '@/context/AuthContext';
 import { api } from '@/services/api';
 import type { DashboardStats, Hotel } from '@resortos/shared';
+import { RoleGuard } from '@/components/RoleGuard';
+import { formatMoney } from '@/utils/format';
 
-export default function AdminDashboardScreen() {
-  const router = useRouter();
+export default function AdminRoute() {
+  return (
+    <RoleGuard audience="admin">
+      <AdminDashboardScreen />
+    </RoleGuard>
+  );
+}
+
+function AdminDashboardScreen() {
   const { user, logout } = useAuth();
 
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -54,13 +62,14 @@ export default function AdminDashboardScreen() {
     loadData();
   };
 
+  // Clearing the session is enough: RoleGuard then redirects to the sign-in
+  // screen. (Navigating here as well raced with that redirect.)
   const handleSignOut = async () => {
     await logout();
-    router.replace('/');
   };
 
   if (isLoading) {
-    return <LoadingView message="Loading executive resort metrics from TiDB Cloud..." />;
+    return <LoadingView message="Loading hotel metrics..." />;
   }
 
   if (error && !stats) {
@@ -75,7 +84,6 @@ export default function AdminDashboardScreen() {
       <AppHeader
         title="Admin Console"
         subtitle={user ? `Signed in: ${user.fullName}` : 'Executive Property Control'}
-        showBack
         rightAction={
           <View style={styles.roleBadge}>
             <ShieldAlert size={14} color={colors.primary} />
@@ -95,7 +103,8 @@ export default function AdminDashboardScreen() {
               {hotel?.name || stats?.hotelName || 'Grand Azure Horizon Resort'}
             </Text>
             <Text style={styles.propertyCode}>
-              Property Code: {hotel?.code || stats?.hotelCode || 'AZR-01'} &bull; 5-Star Luxury
+              Property Code: {hotel?.code || stats?.hotelCode || '-'}
+              {hotel?.starRating ? ` • ${hotel.starRating}-Star` : ''}
             </Text>
           </View>
         </View>
@@ -132,9 +141,9 @@ export default function AdminDashboardScreen() {
             <DollarSign size={18} color={colors.success} />
           </View>
           <Text style={styles.metricValue}>
-            ${stats?.dailyRevenue.toLocaleString() ?? '0'}
+            {formatMoney(stats?.dailyRevenue, hotel?.currency)}
           </Text>
-          <Text style={styles.metricLabel}>Daily Room Revenue</Text>
+          <Text style={styles.metricLabel}>Collected Today</Text>
         </AppCard>
 
         <AppCard style={styles.metricCard} padding="md">
@@ -142,7 +151,7 @@ export default function AdminDashboardScreen() {
             <Users size={18} color={colors.info} />
           </View>
           <Text style={styles.metricValue}>
-            {stats?.activeStaffCount ?? 0} On Duty
+            {stats?.activeStaffCount ?? 0} Active
           </Text>
           <Text style={styles.metricLabel}>Active Staff Members</Text>
         </AppCard>
@@ -151,8 +160,8 @@ export default function AdminDashboardScreen() {
           <View style={[styles.metricIconCircle, { backgroundColor: colors.goldLight }]}>
             <Activity size={18} color={colors.goldAccent} />
           </View>
-          <Text style={styles.metricValue}>Connected</Text>
-          <Text style={styles.metricLabel}>TiDB Cloud Serverless</Text>
+          <Text style={styles.metricValue}>Online</Text>
+          <Text style={styles.metricLabel}>ResortOS Server</Text>
         </AppCard>
       </View>
 
@@ -162,17 +171,17 @@ export default function AdminDashboardScreen() {
         {[
           {
             title: 'Staff & Role Permissions',
-            desc: `${stats?.activeStaffCount ?? 3} active staff members across departments`,
+            desc: `${stats?.activeStaffCount ?? 0} active staff members across departments`,
             icon: Users,
           },
           {
             title: 'Room Inventory & Pricing Tier',
-            desc: `${stats?.totalRooms ?? 12} rooms active across Deluxe, Penthouse & Villa tiers`,
+            desc: `${stats?.totalRooms ?? 0} rooms configured at ${hotel?.name ?? 'this hotel'}`,
             icon: BedDouble,
           },
           {
             title: 'Financial & Billing Audit',
-            desc: 'Daily ledger settlement & automated transaction auditing active',
+            desc: 'Billing, expenses and Daily Summary (coming in later phases)',
             icon: DollarSign,
           },
         ].map((module, index) => {
@@ -197,7 +206,7 @@ export default function AdminDashboardScreen() {
       {/* Footer Navigation */}
       <View style={styles.footer}>
         <AppButton
-          title="Sign Out to Welcome"
+          title="Sign Out"
           variant="outline"
           size="md"
           onPress={handleSignOut}

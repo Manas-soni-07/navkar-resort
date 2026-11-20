@@ -4,11 +4,16 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000 -H 0.0.0.0",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start -p 3000 -H 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
-    "prisma:generate": "prisma generate"
+    "prisma:generate": "prisma generate",
+    "db:push": "node --env-file=.env.local scripts/db-push-local.mjs",
+    "db:seed": "node --env-file=.env.local prisma/seed.mjs",
+    "db:check:tidb": "node --env-file=.env.tidb.local scripts/check-tidb-schema.mjs",
+    "db:backup": "node --env-file=.env.local scripts/backup-db.mjs",
+    "user:set-password": "node --env-file=.env.local scripts/set-password.mjs"
   },
   "dependencies": {
     "@prisma/client": "^6.4.1",

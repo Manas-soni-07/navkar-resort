@@ -1,6 +1,15 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+
+# pnpm 10+ reads these settings from this file; the equivalents in .npmrc are ignored.
+# Expo/Metro (SDK 52) needs a flat, hoisted node_modules to resolve transitive deps
+# such as @babel/runtime.
+nodeLinker: hoisted
+shamefullyHoist: true
+autoInstallPeers: true
+strictPeerDependencies: false
+
 allowBuilds:
   '@prisma/client': true
   '@prisma/engines': true

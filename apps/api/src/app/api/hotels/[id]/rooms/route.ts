@@ -1,21 +1,20 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { getSessionFromRequest } from '@/lib/auth';
-import { successResponse, errorResponse } from '@/lib/api-response';
-import type { Room, RoomStatus, RoomType } from '@resortos/shared';
+import { requireAuthUser, requireAdmin, requireHotelAccess } from '@/lib/auth';
+import { successResponse, errorResponse, handleRouteError } from '@/lib/api-response';
+import { ROOM_STATUSES, ROOM_TYPES, formatRoom } from '@/lib/rooms';
+
+const roomQuerySchema = z.object({
+  status: z.enum(ROOM_STATUSES).optional(),
+  type: z.enum(ROOM_TYPES).optional(),
+  floor: z.coerce.number().int().min(0).optional(),
+});
 
 const createRoomSchema = z.object({
-  roomNumber: z.string().min(1, 'Room number is required'),
+  roomNumber: z.string().trim().min(1, 'Room number is required'),
   floor: z.number().int().min(0),
-  type: z.enum([
-    'STANDARD',
-    'DELUXE',
-    'EXECUTIVE_SUITE',
-    'PRESIDENTIAL_SUITE',
-    'VILLA',
-    'PENTHOUSE',
-  ]),
+  type: z.enum(ROOM_TYPES),
   basePricePerNight: z.number().positive(),
   maxOccupancy: z.number().int().min(1).default(2),
   bedCount: z.number().int().min(1).default(1),
@@ -31,64 +30,43 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await requireAuthUser(req);
     const { id: hotelId } = await params;
+    await requireHotelAccess(user, hotelId);
+
     const { searchParams } = new URL(req.url);
+    const query = roomQuerySchema.safeParse({
+      status: searchParams.get('status') ?? undefined,
+      type: searchParams.get('type') ?? undefined,
+      floor: searchParams.get('floor') ?? undefined,
+    });
 
-    const statusParam = searchParams.get('status') as RoomStatus | null;
-    const floorParam = searchParams.get('floor');
-    const typeParam = searchParams.get('type') as RoomType | null;
-
-    const whereClause: {
-      hotelId: string;
-      status?: RoomStatus;
-      floor?: number;
-      type?: RoomType;
-    } = { hotelId };
-
-    if (statusParam) whereClause.status = statusParam;
-    if (floorParam) whereClause.floor = parseInt(floorParam, 10);
-    if (typeParam) whereClause.type = typeParam;
+    if (!query.success) {
+      return errorResponse('VALIDATION_ERROR', 'Invalid room filter', 400, query.error.errors);
+    }
 
     const rooms = await prisma.room.findMany({
-      where: whereClause,
+      where: { hotelId, ...query.data },
       orderBy: [{ floor: 'asc' }, { roomNumber: 'asc' }],
     });
 
-    const formattedRooms: Room[] = rooms.map((r) => ({
-      id: r.id,
-      hotelId: r.hotelId,
-      roomNumber: r.roomNumber,
-      floor: r.floor,
-      type: r.type as RoomType,
-      status: r.status as RoomStatus,
-      basePricePerNight: Number(r.basePricePerNight),
-      maxOccupancy: r.maxOccupancy,
-      bedCount: r.bedCount,
-      hasBalcony: r.hasBalcony,
-      hasOceanView: r.hasOceanView,
-      description: r.description,
-      createdAt: r.createdAt.toISOString(),
-      updatedAt: r.updatedAt.toISOString(),
-    }));
-
+    const formattedRooms = rooms.map(formatRoom);
     return successResponse(formattedRooms, `Loaded ${formattedRooms.length} rooms`);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to retrieve rooms';
-    return errorResponse('ROOM_FETCH_ERROR', message, 500);
+    return handleRouteError(err, 'ROOM_FETCH_ERROR', 'Failed to retrieve rooms');
   }
 }
 
+/** Room configuration is Admin-only (requirements §6). */
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getSessionFromRequest(req);
+    const user = await requireAuthUser(req);
+    requireAdmin(user);
     const { id: hotelId } = await params;
-
-    if (session.role !== 'ADMIN' && session.role !== 'SUPER_ADMIN' && session.role !== 'MANAGER') {
-      return errorResponse('FORBIDDEN', 'Insufficient permissions to add rooms', 403);
-    }
+    await requireHotelAccess(user, hotelId);
 
     const body = await req.json();
     const parsed = createRoomSchema.safeParse(body);
@@ -128,26 +106,19 @@ export async function POST(
       },
     });
 
-    const formatted: Room = {
-      id: newRoom.id,
-      hotelId: newRoom.hotelId,
-      roomNumber: newRoom.roomNumber,
-      floor: newRoom.floor,
-      type: newRoom.type as RoomType,
-      status: newRoom.status as RoomStatus,
-      basePricePerNight: Number(newRoom.basePricePerNight),
-      maxOccupancy: newRoom.maxOccupancy,
-      bedCount: newRoom.bedCount,
-      hasBalcony: newRoom.hasBalcony,
-      hasOceanView: newRoom.hasOceanView,
-      description: newRoom.description,
-      createdAt: newRoom.createdAt.toISOString(),
-      updatedAt: newRoom.updatedAt.toISOString(),
-    };
+    await prisma.auditLog.create({
+      data: {
+        hotelId,
+        userId: user.id,
+        action: 'CREATE',
+        entityType: 'ROOM',
+        entityId: newRoom.id,
+        details: JSON.stringify({ roomNumber: newRoom.roomNumber }),
+      },
+    });
 
-    return successResponse(formatted, `Room ${newRoom.roomNumber} created successfully`, 201);
+    return successResponse(formatRoom(newRoom), `Room ${newRoom.roomNumber} created successfully`, 201);
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to create room';
-    return errorResponse('ROOM_CREATE_ERROR', message, 500);
+    return handleRouteError(err, 'ROOM_CREATE_ERROR', 'Failed to create room');
   }
 }

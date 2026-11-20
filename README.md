@@ -39,6 +39,83 @@ NewOne/
 
 ---
 
+## Run locally (verified)
+
+These steps were tested end-to-end on Windows 11 with Node 23, Docker Desktop and an
+Android emulator. They use a **local MySQL container** — the TiDB Cloud database is never touched.
+
+```powershell
+# 0. pnpm 12 (the corepack bundled with Node 23.10 cannot run pnpm 12, so use npx)
+npx -y pnpm@12.18.0 install            # or: npm i -g pnpm@12.18.0, then plain `pnpm`
+
+# 1. Local database (MySQL 8 in Docker, port 3307, data kept in a named volume)
+docker run -d --name resortos-mysql-dev -p 3307:3306 `
+  -e MYSQL_ROOT_PASSWORD=<choose-one> -e MYSQL_DATABASE=resortos_dev `
+  -v resortos-mysql-dev-data:/var/lib/mysql mysql:8.0
+#    (next time: docker start resortos-mysql-dev)
+
+# 2. apps/api/.env.local  (copy apps/api/.env.example, then set)
+#      DATABASE_URL="mysql://root:<choose-one>@127.0.0.1:3307/resortos_dev"
+#      JWT_SECRET="<random string, 32+ characters>"     # required; the API refuses to start auth without it
+
+# 3. Create tables + demo data (two hotels: The Villa, Navkar Palace)
+pnpm db:push
+pnpm db:seed
+
+# 4. Start the API (terminal 1) and run the smoke test
+pnpm dev:api
+pnpm test:api                          # 24 checks: login, roles, hotel isolation
+
+# 5. apps/mobile/.env  ->  EXPO_PUBLIC_API_URL=http://<your-PC-LAN-IP>:3000/api
+#    Start Expo (terminal 2), then press "a" for the emulator or scan the QR code in Expo Go
+pnpm dev:mobile
+```
+
+Demo accounts (development seed only — never seed production):
+
+| Portal | Email | Password | Sees |
+| :--- | :--- | :--- | :--- |
+| Admin | `admin@resortos.com` | `admin12345` | All hotels |
+| Manager | `manager.villa@resortos.com` | `manager12345` | The Villa only |
+| Manager | `manager.navkar@resortos.com` | `manager12345` | Navkar Palace only |
+
+If the phone cannot reach the API, allow Node.js through Windows Firewall on private networks (port 3000).
+
+### Connect to TiDB Cloud
+
+1. TiDB Cloud → cluster → **Connect** → *Connect With: Prisma*, database `resortos` → copy `DATABASE_URL`
+   (`mysql://<prefix>.root:<password>@gateway01.<region>.prod.aws.tidbcloud.com:4000/resortos?sslaccept=strict`).
+2. Paste it into `apps/api/.env.tidb.local` and run `pnpm --filter api db:check:tidb`.
+   This is **read-only**: it prints the SQL that would make TiDB match `schema.prisma` but never runs it.
+3. Only after reviewing that output, put the same `DATABASE_URL` in `apps/api/.env.local` and restart the API.
+   Never run `db:seed` or `db push --accept-data-loss` against TiDB (both scripts now refuse to).
+   To go back to the local MySQL container, copy `apps/api/.env.mysql.local` over `.env.local`.
+4. Useful commands (from the repo root):
+   - `pnpm --filter api db:backup`: JSON backup of every table into `backups/` (read-only)
+   - `pnpm --filter api user:set-password <email>`: set an account's password (hidden prompt)
+   - `pnpm --filter api db:check:tidb`: should print "Database matches the schema"
+
+### Build an installable APK (Android)
+
+The API URL is baked into the APK at build time from `apps/mobile/.env` (`EXPO_PUBLIC_API_URL`).
+
+```powershell
+cd apps/mobile
+npx expo prebuild --platform android --no-install      # only needed once / after app.json changes
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'   # JDK 17/21; JDK 25 is too new
+$env:ANDROID_HOME = 'C:\Android\Sdk'
+$env:NODE_ENV = 'production'
+$env:EXPO_NO_METRO_WORKSPACE_ROOT = '1'                 # monorepo: bundle from apps/mobile
+cd android; .\gradlew.bat assembleRelease
+# -> apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+```
+
+Notes: do not set `JAVA_TOOL_OPTIONS` (its stderr notice breaks the native C++ step); the APK is signed with
+the debug key, fine for sideloading but not for the Play Store; `usesCleartextTraffic` is enabled so the APK
+can reach an `http://` LAN API. Turn it off once the API is on HTTPS.
+
+---
+
 ## 3. Installation & Setup
 
 1. **Clone or Open the Repository**:

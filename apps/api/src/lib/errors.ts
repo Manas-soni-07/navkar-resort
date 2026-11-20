@@ -25,6 +25,12 @@ export class UnauthorizedError extends AppError {
   }
 }
 
+export class ForbiddenError extends AppError {
+  constructor(message = 'You do not have permission to perform this action') {
+    super(message, 403, 'FORBIDDEN');
+  }
+}
+
 export class ValidationError extends AppError {
   constructor(message = 'Validation failed', details?: unknown) {
     super(message, 422, 'VALIDATION_ERROR', details);

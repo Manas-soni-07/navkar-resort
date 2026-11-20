@@ -1,48 +1,60 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { successResponse, errorResponse } from '@/lib/api-response';
+import { requireAuthUser, requireHotelAccess } from '@/lib/auth';
+import { successResponse, handleRouteError } from '@/lib/api-response';
+import { todayBoundsInTimeZone } from '@/lib/dates';
 import type { DashboardStats } from '@resortos/shared';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const user = await requireAuthUser(req);
     const { id: hotelId } = await params;
+    await requireHotelAccess(user, hotelId);
 
-    const hotel = await prisma.hotel.findUnique({
+    const hotel = await prisma.hotel.findUniqueOrThrow({
       where: { id: hotelId },
-      select: { name: true, code: true },
+      select: { name: true, code: true, timezone: true },
     });
 
-    if (!hotel) {
-      return errorResponse('HOTEL_NOT_FOUND', 'Hotel not found', 404);
-    }
+    const { start, end } = todayBoundsInTimeZone(hotel.timezone);
 
-    const rooms = await prisma.room.findMany({
-      where: { hotelId },
-      select: {
-        status: true,
-        basePricePerNight: true,
-      },
-    });
-
-    const activeStaffCount = await prisma.staff.count({
-      where: { hotelId, isActive: true },
-    });
+    const [rooms, activeStaffCount, expectedArrivals, expectedDepartures, revenue] =
+      await Promise.all([
+        prisma.room.findMany({ where: { hotelId }, select: { status: true } }),
+        prisma.staff.count({ where: { hotelId, isActive: true } }),
+        // Reservations due to arrive today that have not checked in yet.
+        prisma.booking.count({
+          where: {
+            hotelId,
+            status: { in: ['PENDING', 'CONFIRMED'] },
+            checkInDate: { gte: start, lt: end },
+          },
+        }),
+        // Guests currently in-house whose stay ends today.
+        prisma.booking.count({
+          where: {
+            hotelId,
+            status: 'CHECKED_IN',
+            checkOutDate: { gte: start, lt: end },
+          },
+        }),
+        // Money actually collected today (each payment counted once).
+        prisma.payment.aggregate({
+          where: { hotelId, status: 'COMPLETED', paidAt: { gte: start, lt: end } },
+          _sum: { amount: true },
+        }),
+      ]);
 
     const totalRooms = rooms.length;
     const occupiedRooms = rooms.filter((r) => r.status === 'OCCUPIED').length;
     const availableRooms = rooms.filter((r) => r.status === 'AVAILABLE').length;
     const dirtyRooms = rooms.filter((r) => r.status === 'DIRTY' || r.status === 'CLEANING').length;
-
     const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
-
-    const dailyRevenue = rooms
-      .filter((r) => r.status === 'OCCUPIED')
-      .reduce((sum, r) => sum + Number(r.basePricePerNight), 0);
 
     const stats: DashboardStats = {
       hotelName: hotel.name,
@@ -52,15 +64,14 @@ export async function GET(
       availableRooms,
       dirtyRooms,
       occupancyRate,
-      dailyRevenue,
+      dailyRevenue: Number(revenue._sum.amount ?? 0),
       activeStaffCount,
-      expectedArrivals: availableRooms > 3 ? 3 : availableRooms,
-      expectedDepartures: occupiedRooms > 2 ? 2 : occupiedRooms,
+      expectedArrivals,
+      expectedDepartures,
     };
 
     return successResponse(stats, 'Hotel metrics loaded successfully');
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to compile dashboard metrics';
-    return errorResponse('METRICS_ERROR', message, 500);
+    return handleRouteError(err, 'METRICS_ERROR', 'Failed to compile dashboard metrics');
   }
 }

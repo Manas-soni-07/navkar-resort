@@ -1,21 +1,13 @@
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/prisma';
-import { getSessionFromRequest } from '@/lib/auth';
-import { successResponse, errorResponse } from '@/lib/api-response';
-import type { Room, RoomStatus, RoomType } from '@resortos/shared';
+import { requireAuthUser, requireHotelAccess } from '@/lib/auth';
+import { successResponse, errorResponse, handleRouteError } from '@/lib/api-response';
+import { ROOM_STATUSES, formatRoom } from '@/lib/rooms';
 
 const updateStatusSchema = z.object({
-  status: z.enum([
-    'AVAILABLE',
-    'OCCUPIED',
-    'DIRTY',
-    'CLEANING',
-    'INSPECTION',
-    'MAINTENANCE',
-    'BLOCKED',
-  ]),
-  remarks: z.string().optional(),
+  status: z.enum(ROOM_STATUSES),
+  remarks: z.string().max(500).optional(),
 });
 
 export const dynamic = 'force-dynamic';
@@ -25,7 +17,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getSessionFromRequest(req);
+    const user = await requireAuthUser(req);
     const { id: roomId } = await params;
 
     const body = await req.json();
@@ -45,6 +37,9 @@ export async function PATCH(
       return errorResponse('NOT_FOUND', 'Room not found', 404);
     }
 
+    // The room's own hotel decides access — never a client-supplied hotelId.
+    await requireHotelAccess(user, currentRoom.hotelId);
+
     const previousStatus = currentRoom.status;
 
     const updated = await prisma.room.update({
@@ -52,11 +47,10 @@ export async function PATCH(
       data: { status: targetStatus },
     });
 
-    // Record Audit Log
     await prisma.auditLog.create({
       data: {
         hotelId: updated.hotelId,
-        userId: session.userId,
+        userId: user.id,
         action: 'STATUS_CHANGE',
         entityType: 'ROOM',
         entityId: updated.id,
@@ -69,29 +63,11 @@ export async function PATCH(
       },
     });
 
-    const formatted: Room = {
-      id: updated.id,
-      hotelId: updated.hotelId,
-      roomNumber: updated.roomNumber,
-      floor: updated.floor,
-      type: updated.type as RoomType,
-      status: updated.status as RoomStatus,
-      basePricePerNight: Number(updated.basePricePerNight),
-      maxOccupancy: updated.maxOccupancy,
-      bedCount: updated.bedCount,
-      hasBalcony: updated.hasBalcony,
-      hasOceanView: updated.hasOceanView,
-      description: updated.description,
-      createdAt: updated.createdAt.toISOString(),
-      updatedAt: updated.updatedAt.toISOString(),
-    };
-
     return successResponse(
-      formatted,
+      formatRoom(updated),
       `Room ${updated.roomNumber} transitioned from ${previousStatus} to ${targetStatus}`
     );
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to update room status';
-    return errorResponse('STATUS_UPDATE_ERROR', message, 500);
+    return handleRouteError(err, 'STATUS_UPDATE_ERROR', 'Failed to update room status');
   }
 }

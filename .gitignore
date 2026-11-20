@@ -41,3 +41,10 @@ Thumbs.db
 # Prisma local SQLite or temp files
 *.db
 *.db-journal
+
+# Built APKs
+dist/
+*.apk
+
+# Database backups (contain password hashes)
+backups/

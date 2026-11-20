@@ -1,7 +1,12 @@
 // ========================================================
-// ResortOS Enterprise Prisma Schema
-// Target Database: TiDB Cloud Serverless (MySQL 8.0 Protocol)
-// Architecture: Multi-tenant, distributed SQL optimized
+// ResortOS Prisma Schema
+// Target Database: TiDB Cloud Serverless (MySQL 8.0 protocol)
+//
+// Aligned with the LIVE TiDB `resortos` database on 2026-11-20 (see docs/AUDIT_REPORT.md §5):
+// every table, column, type and index name below exists in TiDB, so
+// `prisma migrate diff` against TiDB is empty. Columns marked "legacy" were
+// created by an earlier version of the app and still hold data; keep them
+// until their data has been migrated. NEVER run `db push` against TiDB.
 // ========================================================
 
 datasource db {
@@ -143,8 +148,49 @@ enum AuditAction {
   VOID
 }
 
+// Legacy module enums (lower-case values exist in TiDB data)
+enum BanquetEventStatus {
+  confirmed
+  in_progress
+  completed
+  cancelled
+}
+
+enum ConciergeBookingStatus {
+  scheduled
+  in_transit
+  completed
+  cancelled
+}
+
+enum DiningOrderStatus {
+  received
+  in_kitchen
+  out_for_delivery
+  delivered
+}
+
+enum HousekeepingPriority {
+  urgent
+  high
+  normal
+}
+
+enum HousekeepingTicketStatus {
+  pending
+  in_progress
+  completed
+}
+
+enum SpaBookingStatus {
+  scheduled
+  in_session
+  completed
+  cancelled
+}
+
 // ========================================================
-// SYSTEM & HEALTH (Backwards compatibility)
+// SYSTEM & HEALTH
 // ========================================================
 
 model SystemHealth {
@@ -163,12 +209,12 @@ model SystemHealth {
 model Organization {
   id           String   @id @default(cuid())
   name         String
-  slug         String   @unique
+  slug         String   @unique(map: "slug")
   taxNumber    String?
   contactEmail String
   contactPhone String?
   createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  updatedAt    DateTime @default(now()) @updatedAt
 
   hotels Hotel[]
   users  User[]
@@ -185,7 +231,7 @@ model Hotel {
   organizationId String
   name           String
   slug           String
-  code           String      @unique
+  code           String      @unique(map: "code")
   status         HotelStatus @default(ACTIVE)
   starRating     Int?        @default(4)
   address        String
@@ -201,7 +247,7 @@ model Hotel {
   checkInTime    String      @default("14:00")
   checkOutTime   String      @default("11:00")
   createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
+  updatedAt      DateTime    @default(now()) @updatedAt
 
   organization       Organization        @relation(fields: [organizationId], references: [id])
   users              User[]
@@ -218,9 +264,9 @@ model Hotel {
   expenses           Expense[]
   auditLogs          AuditLog[]
 
-  @@index([organizationId])
-  @@index([slug])
-  @@index([status])
+  @@index([organizationId], map: "idx_hotels_org")
+  @@index([slug], map: "idx_hotels_slug")
+  @@index([status], map: "idx_hotels_status")
   @@map("hotels")
 }
 
@@ -232,7 +278,7 @@ model User {
   id             String     @id @default(cuid())
   organizationId String
   hotelId        String?
-  email          String     @unique
+  email          String     @unique(map: "email")
   passwordHash   String
   fullName       String
   phone          String?
@@ -240,7 +286,7 @@ model User {
   status         UserStatus @default(ACTIVE)
   lastLoginAt    DateTime?
   createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  updatedAt      DateTime   @default(now()) @updatedAt
 
   organization       Organization        @relation(fields: [organizationId], references: [id])
   hotel              Hotel?              @relation(fields: [hotelId], references: [id])
@@ -249,10 +295,10 @@ model User {
   processedPayments  Payment[]           @relation("PaymentProcessedBy")
   auditLogs          AuditLog[]
 
-  @@index([organizationId])
-  @@index([hotelId])
-  @@index([role])
-  @@index([status])
+  @@index([organizationId], map: "idx_users_org")
+  @@index([hotelId], map: "idx_users_hotel")
+  @@index([role], map: "idx_users_role")
+  @@index([status], map: "idx_users_status")
   @@map("users")
 }
 
@@ -270,8 +316,8 @@ model ManagerAssignment {
   user  User  @relation(fields: [userId], references: [id])
   hotel Hotel @relation(fields: [hotelId], references: [id])
 
-  @@unique([userId, hotelId])
-  @@index([hotelId])
+  @@unique([userId, hotelId], map: "uq_manager_hotel")
+  @@index([hotelId], map: "idx_manager_hotel")
   @@map("manager_assignments")
 }
 
@@ -295,17 +341,25 @@ model Staff {
   terminationDate DateTime?
   isActive        Boolean   @default(true)
   createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  updatedAt       DateTime  @default(now()) @updatedAt
+  // legacy
+  fullName        String?
+  role            String?   @db.VarChar(100)
+  monthlySalary   Decimal?  @default(0) @db.Decimal(10, 2)
+  joinDate        DateTime? @db.Date
+  status          String?   @default("ACTIVE") @db.VarChar(50)
+  shift           String?   @default("Morning") @db.VarChar(50)
+  checkInTime     String?   @db.VarChar(50)
 
   hotel          Hotel           @relation(fields: [hotelId], references: [id])
   attendances    Attendance[]
   staffAdvances  StaffAdvance[]
   salaryPayments SalaryPayment[]
 
-  @@unique([hotelId, employeeCode])
-  @@index([hotelId])
-  @@index([department])
-  @@index([isActive])
+  @@unique([hotelId, employeeCode], map: "uq_staff_hotel_emp")
+  @@index([hotelId], map: "idx_staff_hotel")
+  @@index([department], map: "idx_staff_dept")
+  @@index([isActive], map: "idx_staff_active")
   @@map("staff")
 }
 
@@ -314,23 +368,27 @@ model Staff {
 // ========================================================
 
 model Attendance {
-  id        String           @id @default(cuid())
-  staffId   String
-  hotelId   String
-  date      DateTime         @db.Date
-  checkIn   DateTime?
-  checkOut  DateTime?
-  status    AttendanceStatus @default(PRESENT)
-  notes     String?
-  createdAt DateTime         @default(now())
+  id          String           @id @default(cuid())
+  staffId     String
+  hotelId     String
+  date        DateTime         @db.Date
+  checkIn     DateTime?
+  checkOut    DateTime?
+  status      AttendanceStatus @default(PRESENT)
+  notes       String?          @db.Text
+  createdAt   DateTime         @default(now())
+  // legacy
+  checkInTime String?          @db.VarChar(50)
+  staffName   String?
+  role        String?          @db.VarChar(100)
 
   staff Staff @relation(fields: [staffId], references: [id])
   hotel Hotel @relation(fields: [hotelId], references: [id])
 
-  @@unique([staffId, date])
-  @@index([hotelId])
-  @@index([date])
-  @@index([status])
+  @@unique([staffId, date], map: "uq_staff_date")
+  @@index([hotelId], map: "idx_att_hotel")
+  @@index([date], map: "idx_att_date")
+  @@index([status], map: "idx_att_status")
   @@map("attendances")
 }
 
@@ -339,22 +397,31 @@ model Attendance {
 // ========================================================
 
 model StaffAdvance {
-  id           String        @id @default(cuid())
-  staffId      String
-  hotelId      String
-  amount       Decimal       @db.Decimal(10, 2)
-  repaidAmount Decimal       @default(0) @db.Decimal(10, 2)
-  status       AdvanceStatus @default(PENDING)
-  requestDate  DateTime      @default(now())
-  approvedDate DateTime?
-  notes        String?
+  id            String        @id @default(cuid())
+  staffId       String
+  hotelId       String
+  amount        Decimal       @db.Decimal(10, 2)
+  repaidAmount  Decimal       @default(0.00) @db.Decimal(10, 2)
+  status        AdvanceStatus @default(PENDING)
+  requestDate   DateTime      @default(now())
+  approvedDate  DateTime?
+  notes         String?       @db.Text
+  // legacy
+  advanceDate   DateTime?     @db.Date
+  reason        String?       @db.VarChar(255)
+  paymentMethod String?       @default("CASH") @db.VarChar(50)
+  isDeducted    Boolean?      @default(false)
+  deductedMonth String?       @db.VarChar(100)
+  createdAt     DateTime?     @default(now()) @db.Timestamp(0)
+  staffName     String?
+  staffRole     String?       @db.VarChar(100)
 
   staff Staff @relation(fields: [staffId], references: [id])
   hotel Hotel @relation(fields: [hotelId], references: [id])
 
-  @@index([hotelId])
-  @@index([staffId])
-  @@index([status])
+  @@index([hotelId], map: "idx_adv_hotel")
+  @@index([staffId], map: "idx_adv_staff")
+  @@index([status], map: "idx_adv_status")
   @@map("staff_advances")
 }
 
@@ -363,27 +430,34 @@ model StaffAdvance {
 // ========================================================
 
 model SalaryPayment {
-  id            String         @id @default(cuid())
-  staffId       String
-  hotelId       String
-  month         Int
-  year          Int
-  baseSalary    Decimal        @db.Decimal(10, 2)
-  allowances    Decimal        @default(0) @db.Decimal(10, 2)
-  deductions    Decimal        @default(0) @db.Decimal(10, 2)
-  netAmount     Decimal        @db.Decimal(10, 2)
-  status        SalaryStatus   @default(PENDING)
-  paidAt        DateTime?
-  paymentMethod PaymentMethod?
-  reference     String?
+  id                String         @id @default(cuid())
+  staffId           String
+  hotelId           String
+  month             Int
+  year              Int
+  baseSalary        Decimal        @db.Decimal(10, 2)
+  allowances        Decimal        @default(0.00) @db.Decimal(10, 2)
+  deductions        Decimal        @default(0.00) @db.Decimal(10, 2)
+  netAmount         Decimal        @db.Decimal(10, 2)
+  status            SalaryStatus   @default(PENDING)
+  paidAt            DateTime?
+  paymentMethod     PaymentMethod?
+  reference         String?
+  // legacy
+  presentDays       Int?           @default(30)
+  halfDays          Int?           @default(0)
+  absentDays        Int?           @default(0)
+  advanceDeductions Decimal?       @default(0.00) @db.Decimal(10, 2)
+  staffName         String?
+  role              String?        @db.VarChar(100)
 
   staff Staff @relation(fields: [staffId], references: [id])
   hotel Hotel @relation(fields: [hotelId], references: [id])
 
-  @@unique([staffId, month, year])
-  @@index([hotelId])
-  @@index([year, month])
-  @@index([status])
+  @@unique([staffId, month, year], map: "uq_salary_staff_period")
+  @@index([hotelId], map: "idx_sal_hotel")
+  @@index([year, month], map: "idx_sal_period")
+  @@index([status], map: "idx_sal_status")
   @@map("salary_payments")
 }
 
@@ -392,29 +466,37 @@ model SalaryPayment {
 // ========================================================
 
 model Room {
-  id                String     @id @default(cuid())
-  hotelId           String
-  roomNumber        String
-  floor             Int
-  type              RoomType   @default(STANDARD)
-  status            RoomStatus @default(AVAILABLE)
-  basePricePerNight Decimal    @db.Decimal(10, 2)
-  maxOccupancy      Int        @default(2)
-  bedCount          Int        @default(1)
-  hasBalcony        Boolean    @default(false)
-  hasOceanView      Boolean    @default(false)
-  description       String?
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  id                 String     @id @default(cuid())
+  hotelId            String
+  roomNumber         String
+  floor              Int
+  type               RoomType   @default(STANDARD)
+  status             RoomStatus @default(AVAILABLE)
+  basePricePerNight  Decimal    @db.Decimal(10, 2)
+  maxOccupancy       Int        @default(2)
+  bedCount           Int        @default(1)
+  hasBalcony         Boolean    @default(false)
+  hasOceanView       Boolean    @default(false)
+  description        String?    @db.Text
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @default(now()) @updatedAt
+  // legacy
+  category           String?    @db.VarChar(100)
+  defaultPrice       Decimal?   @db.Decimal(10, 2)
+  housekeepingStatus String?    @default("clean") @db.VarChar(50)
+  capacity           Int?       @default(2)
+  ratePerNight       Decimal?   @default(2500.00) @db.Decimal(10, 2)
+  currentGuestName   String?
+  currentBookingId   String?
 
   hotel        Hotel         @relation(fields: [hotelId], references: [id])
   bookingRooms BookingRoom[]
   stays        Stay[]
 
-  @@unique([hotelId, roomNumber])
-  @@index([hotelId])
-  @@index([type])
-  @@index([status])
+  @@unique([hotelId, roomNumber], map: "uq_rooms_hotel_num")
+  @@index([hotelId], map: "idx_rooms_hotel")
+  @@index([type], map: "idx_rooms_type")
+  @@index([status], map: "idx_rooms_status")
   @@map("rooms")
 }
 
@@ -436,17 +518,17 @@ model Guest {
   city            String?
   country         String?
   vipStatus       Boolean  @default(false)
-  specialRequests String?
+  specialRequests String?  @db.Text
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  updatedAt       DateTime @default(now()) @updatedAt
 
   bookings   Booking[]
   stayGuests StayGuest[]
 
-  @@index([organizationId])
-  @@index([email])
-  @@index([phone])
-  @@index([idNumber])
+  @@index([organizationId], map: "idx_guests_org")
+  @@index([email], map: "idx_guests_email")
+  @@index([phone], map: "idx_guests_phone")
+  @@index([idNumber], map: "idx_guests_idnum")
   @@map("guests")
 }
 
@@ -457,23 +539,43 @@ model Guest {
 model Booking {
   id               String        @id @default(cuid())
   hotelId          String
-  guestId          String
+  // Optional in TiDB: legacy bookings store the guest inline (guestName/guestPhone/guestEmail).
+  guestId          String?
   createdById      String?
-  bookingReference String        @unique
+  bookingReference String        @unique(map: "bookingReference")
   status           BookingStatus @default(PENDING)
   checkInDate      DateTime
   checkOutDate     DateTime
   totalGuests      Int           @default(1)
   totalRooms       Int           @default(1)
   totalAmount      Decimal       @db.Decimal(12, 2)
-  taxAmount        Decimal       @default(0) @db.Decimal(10, 2)
-  discountAmount   Decimal       @default(0) @db.Decimal(10, 2)
-  notes            String?
+  taxAmount        Decimal       @default(0.00) @db.Decimal(10, 2)
+  discountAmount   Decimal       @default(0.00) @db.Decimal(10, 2)
+  notes            String?       @db.Text
   createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  updatedAt        DateTime      @default(now()) @updatedAt
+  // legacy (room + event booking fields used by the earlier app)
+  bookingType      String?       @default("normal") @db.VarChar(50)
+  eventName        String?
+  requiredRooms    Int?          @default(0)
+  allocatedRooms   Int?          @default(0)
+  remainingRooms   Int?          @default(0)
+  guestName        String?
+  guestPhone       String?       @db.VarChar(50)
+  guestEmail       String?
+  roomType         String?       @db.VarChar(100)
+  roomPrice        Decimal?      @default(0) @db.Decimal(10, 2)
+  advanceAmount    Decimal?      @default(0) @db.Decimal(10, 2)
+  paymentMethod    String?       @default("UPI") @db.VarChar(50)
+  roomId           String?
+  roomNumber       String?       @db.VarChar(50)
+  roomCategory     String?       @db.VarChar(100)
+  depositPaid      Decimal?      @default(0) @db.Decimal(12, 2)
+  paymentStatus    String?       @default("paid") @db.VarChar(50)
+  nightsCount      Int?          @default(1)
 
   hotel        Hotel                @relation(fields: [hotelId], references: [id])
-  guest        Guest                @relation(fields: [guestId], references: [id])
+  guest        Guest?               @relation(fields: [guestId], references: [id])
   createdBy    User?                @relation("BookedByUser", fields: [createdById], references: [id])
   bookingRooms BookingRoom[]
   extraCharges BookingExtraCharge[]
@@ -481,12 +583,12 @@ model Booking {
   invoices     Invoice[]
   payments     Payment[]
 
-  @@index([hotelId])
-  @@index([guestId])
-  @@index([createdById])
-  @@index([status])
-  @@index([checkInDate])
-  @@index([checkOutDate])
+  @@index([hotelId], map: "idx_bookings_hotel")
+  @@index([guestId], map: "idx_bookings_guest")
+  @@index([createdById], map: "idx_bookings_creator")
+  @@index([status], map: "idx_bookings_status")
+  @@index([checkInDate], map: "idx_bookings_checkin")
+  @@index([checkOutDate], map: "idx_bookings_checkout")
   @@map("bookings")
 }
 
@@ -503,8 +605,8 @@ model BookingRoom {
   booking Booking @relation(fields: [bookingId], references: [id])
   room    Room    @relation(fields: [roomId], references: [id])
 
-  @@unique([bookingId, roomId])
-  @@index([roomId])
+  @@unique([bookingId, roomId], map: "uq_booking_room")
+  @@index([roomId], map: "idx_bkroom_room")
   @@map("booking_rooms")
 }
 
@@ -523,7 +625,7 @@ model BookingExtraCharge {
 
   booking Booking @relation(fields: [bookingId], references: [id])
 
-  @@index([bookingId])
+  @@index([bookingId], map: "idx_extra_booking")
   @@map("booking_extra_charges")
 }
 
@@ -534,22 +636,22 @@ model BookingExtraCharge {
 model Stay {
   id             String     @id @default(cuid())
   hotelId        String
-  bookingId      String     @unique
+  bookingId      String     @unique(map: "bookingId")
   roomId         String
   status         StayStatus @default(ACTIVE)
   actualCheckIn  DateTime   @default(now())
   actualCheckOut DateTime?
   keyCardCount   Int        @default(1)
-  remarks        String?
+  remarks        String?    @db.Text
 
   hotel      Hotel       @relation(fields: [hotelId], references: [id])
   booking    Booking     @relation(fields: [bookingId], references: [id])
   room       Room        @relation(fields: [roomId], references: [id])
   stayGuests StayGuest[]
 
-  @@index([hotelId])
-  @@index([roomId])
-  @@index([status])
+  @@index([hotelId], map: "idx_stays_hotel")
+  @@index([roomId], map: "idx_stays_room")
+  @@index([status], map: "idx_stays_status")
   @@map("stays")
 }
 
@@ -566,8 +668,8 @@ model StayGuest {
   stay  Stay  @relation(fields: [stayId], references: [id])
   guest Guest @relation(fields: [guestId], references: [id])
 
-  @@unique([stayId, guestId])
-  @@index([guestId])
+  @@unique([stayId, guestId], map: "uq_stay_guest")
+  @@index([guestId], map: "idx_stay_guest_id")
   @@map("stay_guests")
 }
 
@@ -581,7 +683,7 @@ model Payment {
   bookingId            String?
   invoiceId            String?
   processedById        String?
-  transactionReference String        @unique
+  transactionReference String        @unique(map: "transactionReference")
   amount               Decimal       @db.Decimal(12, 2)
   currency             String        @default("USD")
   paymentMethod        PaymentMethod @default(CASH)
@@ -594,12 +696,12 @@ model Payment {
   invoice     Invoice? @relation(fields: [invoiceId], references: [id])
   processedBy User?    @relation("PaymentProcessedBy", fields: [processedById], references: [id])
 
-  @@index([hotelId])
-  @@index([bookingId])
-  @@index([invoiceId])
-  @@index([processedById])
-  @@index([status])
-  @@index([paidAt])
+  @@index([hotelId], map: "idx_pay_hotel")
+  @@index([bookingId], map: "idx_pay_booking")
+  @@index([invoiceId], map: "idx_pay_invoice")
+  @@index([processedById], map: "idx_pay_user")
+  @@index([status], map: "idx_pay_status")
+  @@index([paidAt], map: "idx_pay_date")
   @@map("payments")
 }
 
@@ -611,23 +713,30 @@ model Invoice {
   id             String        @id @default(cuid())
   hotelId        String
   bookingId      String
-  invoiceNumber  String        @unique
+  invoiceNumber  String        @unique(map: "invoiceNumber")
   subtotal       Decimal       @db.Decimal(12, 2)
   taxAmount      Decimal       @db.Decimal(10, 2)
-  discountAmount Decimal       @default(0) @db.Decimal(10, 2)
+  discountAmount Decimal       @default(0.00) @db.Decimal(10, 2)
   totalAmount    Decimal       @db.Decimal(12, 2)
-  paidAmount     Decimal       @default(0) @db.Decimal(12, 2)
+  paidAmount     Decimal       @default(0.00) @db.Decimal(12, 2)
   status         InvoiceStatus @default(DRAFT)
   dueDate        DateTime?
   issuedAt       DateTime      @default(now())
+  // legacy (itemised billing used by the earlier app)
+  guestName      String?
+  roomNumber     String?       @db.VarChar(50)
+  itemsJson      Json?
+  balanceDue     Decimal?      @default(0.00) @db.Decimal(10, 2)
+  settledAt      String?       @db.VarChar(100)
+  paymentMethod  String?       @db.VarChar(50)
 
   hotel    Hotel     @relation(fields: [hotelId], references: [id])
   booking  Booking   @relation(fields: [bookingId], references: [id])
   payments Payment[]
 
-  @@index([hotelId])
-  @@index([bookingId])
-  @@index([status])
+  @@index([hotelId], map: "idx_inv_hotel")
+  @@index([bookingId], map: "idx_inv_booking")
+  @@index([status], map: "idx_inv_status")
   @@map("invoices")
 }
 
@@ -646,12 +755,18 @@ model Expense {
   receiptUrl    String?
   incurredAt    DateTime
   createdAt     DateTime        @default(now())
+  // legacy (spec §8: description / "Added By")
+  expenseDate   DateTime?       @db.Date
+  paidTo        String?
+  description   String?         @db.Text
+  vendor        String?
+  recordedBy    String?         @default("Manager")
 
   hotel Hotel @relation(fields: [hotelId], references: [id])
 
-  @@index([hotelId])
-  @@index([category])
-  @@index([incurredAt])
+  @@index([hotelId], map: "idx_exp_hotel")
+  @@index([category], map: "idx_exp_category")
+  @@index([incurredAt], map: "idx_exp_date")
   @@map("expenses")
 }
 
@@ -674,10 +789,155 @@ model AuditLog {
   hotel Hotel? @relation(fields: [hotelId], references: [id])
   user  User?  @relation(fields: [userId], references: [id])
 
-  @@index([hotelId])
-  @@index([userId])
-  @@index([action])
-  @@index([entityType])
-  @@index([createdAt])
+  @@index([hotelId], map: "idx_audit_hotel")
+  @@index([userId], map: "idx_audit_user")
+  @@index([action], map: "idx_audit_action")
+  @@index([entityType], map: "idx_audit_entity")
+  @@index([createdAt], map: "idx_audit_created")
   @@map("audit_logs")
+}
+
+// ========================================================
+// LEGACY MODULE TABLES (created by an earlier app version; hold data)
+// Modelled as-is so they are never dropped. Not used by the API yet.
+// ========================================================
+
+model BanquetEvent {
+  id           String              @id @default(cuid())
+  hotelId      String
+  eventName    String
+  eventType    String              @db.VarChar(100)
+  clientName   String
+  clientPhone  String              @db.VarChar(50)
+  venueName    String
+  eventDate    DateTime            @db.Date
+  guestCount   Int
+  perPlateRate Decimal             @db.Decimal(10, 2)
+  cateringType String              @db.VarChar(100)
+  totalAmount  Decimal             @db.Decimal(12, 2)
+  depositPaid  Decimal             @db.Decimal(12, 2)
+  status       BanquetEventStatus? @default(confirmed)
+  decorPackage String?             @db.Text
+  createdAt    DateTime?           @default(now()) @db.Timestamp(0)
+
+  @@map("banquet_events")
+}
+
+model ConciergeBooking {
+  id                    String                  @id @default(cuid())
+  hotelId               String
+  bookingRef            String                  @unique(map: "bookingRef") @db.VarChar(50)
+  roomNumber            String                  @db.VarChar(20)
+  guestName             String
+  serviceTitle          String
+  category              String                  @db.VarChar(100)
+  driverOrGuideName     String
+  vehicleOrVesselNumber String                  @db.VarChar(100)
+  pickupTime            String                  @db.VarChar(50)
+  date                  DateTime                @db.Date
+  numberOfGuests        Int
+  totalAmount           Decimal                 @db.Decimal(10, 2)
+  gstAmount             Decimal                 @db.Decimal(10, 2)
+  status                ConciergeBookingStatus? @default(scheduled)
+  notes                 String?                 @db.Text
+  createdAt             DateTime?               @default(now()) @db.Timestamp(0)
+
+  @@map("concierge_bookings")
+}
+
+model DiningOrder {
+  id          String             @id @default(cuid())
+  hotelId     String
+  orderNumber String             @unique(map: "orderNumber") @db.VarChar(50)
+  roomNumber  String             @db.VarChar(20)
+  guestName   String
+  itemsJson   Json
+  subtotal    Decimal            @db.Decimal(10, 2)
+  gstAmount   Decimal            @db.Decimal(10, 2)
+  totalAmount Decimal            @db.Decimal(10, 2)
+  status      DiningOrderStatus? @default(received)
+  dietaryNote String?            @db.Text
+  createdAt   String             @db.VarChar(50)
+
+  @@map("dining_orders")
+}
+
+model ExcursionPackage {
+  id                 String  @id @default(cuid())
+  title              String
+  duration           String  @db.VarChar(50)
+  pricePerPerson     Decimal @db.Decimal(10, 2)
+  category           String  @db.VarChar(100)
+  description        String? @db.Text
+  includedHighlights Json?
+
+  @@map("excursion_packages")
+}
+
+model HousekeepingTicket {
+  id                String                    @id @default(cuid())
+  hotelId           String
+  roomNumber        String                    @db.VarChar(20)
+  ticketType        String                    @db.VarChar(100)
+  priority          HousekeepingPriority?     @default(normal)
+  assignedStaffName String
+  status            HousekeepingTicketStatus? @default(pending)
+  requestedTime     String                    @db.VarChar(50)
+  notes             String?                   @db.Text
+  createdAt         DateTime?                 @default(now()) @db.Timestamp(0)
+
+  @@map("housekeeping_tickets")
+}
+
+model ShiftHandover {
+  id                        String    @id @default(cuid())
+  hotelId                   String
+  outgoingManagerName       String
+  incomingManagerName       String
+  shiftFrom                 String    @db.VarChar(50)
+  shiftTo                   String    @db.VarChar(50)
+  timestamp                 String    @db.VarChar(100)
+  frontDeskCashCollected    Decimal   @db.Decimal(10, 2)
+  upiSettlementsCount       Int
+  upiSettlementsAmount      Decimal   @db.Decimal(12, 2)
+  pendingGuestRequestsCount Int
+  vipGuestsInHouse          Json?
+  keyHandoversNotes         String?   @db.Text
+  status                    String?   @default("completed") @db.VarChar(50)
+  createdAt                 DateTime? @default(now()) @db.Timestamp(0)
+
+  @@map("shift_handovers")
+}
+
+model SpaBooking {
+  id            String            @id @default(cuid())
+  hotelId       String
+  bookingRef    String            @unique(map: "bookingRef") @db.VarChar(50)
+  roomNumber    String            @db.VarChar(20)
+  guestName     String
+  treatmentName String
+  therapistName String
+  treatmentRoom String            @db.VarChar(100)
+  timeSlot      String            @db.VarChar(50)
+  date          DateTime          @db.Date
+  price         Decimal           @db.Decimal(10, 2)
+  gstAmount     Decimal           @db.Decimal(10, 2)
+  totalAmount   Decimal           @db.Decimal(10, 2)
+  status        SpaBookingStatus? @default(scheduled)
+  healthNotes   String?           @db.Text
+  createdAt     DateTime?         @default(now()) @db.Timestamp(0)
+
+  @@map("spa_bookings")
+}
+
+model SpaTreatment {
+  id                String  @id @default(cuid())
+  name              String
+  durationMinutes   Int
+  price             Decimal @db.Decimal(10, 2)
+  category          String  @db.VarChar(100)
+  description       String? @db.Text
+  herbalIngredients String? @db.Text
+
+  @@map("spa_treatments")
 }

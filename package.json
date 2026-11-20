@@ -9,6 +9,9 @@
     "dev:api": "pnpm --filter api dev",
     "build:api": "pnpm --filter api build",
     "start:api": "pnpm --filter api start",
+    "db:push": "pnpm --filter api db:push",
+    "db:seed": "pnpm --filter api db:seed",
+    "test:api": "node apps/api/scripts/smoke-test.mjs",
     "typecheck": "pnpm -r --parallel typecheck",
     "lint": "pnpm -r --parallel lint"
   },

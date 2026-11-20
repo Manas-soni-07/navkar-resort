@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
-import { useRouter } from 'expo-router';
 import {
   UserCheck,
   Clock,
@@ -18,9 +17,18 @@ import { colors, spacing, typography, borderRadius } from '@/theme';
 import { useAuth } from '@/context/AuthContext';
 import { api } from '@/services/api';
 import type { Room, RoomStatus, Hotel } from '@resortos/shared';
+import { RoleGuard } from '@/components/RoleGuard';
+import { formatMoney } from '@/utils/format';
 
-export default function ManagerDashboardScreen() {
-  const router = useRouter();
+export default function ManagerRoute() {
+  return (
+    <RoleGuard audience="manager">
+      <ManagerDashboardScreen />
+    </RoleGuard>
+  );
+}
+
+function ManagerDashboardScreen() {
   const { user, logout } = useAuth();
 
   const [hotel, setHotel] = useState<Hotel | null>(null);
@@ -87,13 +95,14 @@ export default function ManagerDashboardScreen() {
     }
   };
 
+  // Clearing the session is enough: RoleGuard then redirects to the sign-in
+  // screen. (Navigating here as well raced with that redirect.)
   const handleSignOut = async () => {
     await logout();
-    router.replace('/');
   };
 
   if (isLoading) {
-    return <LoadingView message="Connecting to TiDB Cloud & loading room dispatch..." />;
+    return <LoadingView message="Loading rooms..." />;
   }
 
   if (error && rooms.length === 0) {
@@ -134,7 +143,6 @@ export default function ManagerDashboardScreen() {
       <AppHeader
         title="Manager Desk"
         subtitle={user ? `Signed in: ${user.fullName}` : 'Daily Operations & Guest Flow'}
-        showBack
         rightAction={
           <View style={styles.roleBadge}>
             <UserCheck size={14} color={colors.success} />
@@ -149,10 +157,11 @@ export default function ManagerDashboardScreen() {
           <Clock size={20} color={colors.primary} />
           <View style={styles.shiftTextWrapper}>
             <Text style={styles.shiftTitle}>
-              {hotel?.name || 'Grand Azure Horizon Resort'} &bull; Morning Shift
+              {hotel?.name ?? 'Your hotel'}
             </Text>
             <Text style={styles.shiftTiming}>
-              Active Desk #1 &bull; Live TiDB Cloud Multi-Region Sync
+              Hotel code {hotel?.code ?? '-'} &bull; Check-in {hotel?.checkInTime ?? '-'} &bull; Check-out{' '}
+              {hotel?.checkOutTime ?? '-'}
             </Text>
           </View>
         </View>
@@ -260,7 +269,7 @@ export default function ManagerDashboardScreen() {
                     </View>
                   </View>
                   <Text style={styles.roomType}>
-                    Floor {room.floor} &bull; {room.type.replace('_', ' ')} &bull; ${room.basePricePerNight}/night
+                    Floor {room.floor} &bull; {room.type.replace(/_/g, ' ')} &bull; {formatMoney(room.basePricePerNight, hotel?.currency)}/night
                   </Text>
                   {room.hasOceanView && (
                     <Text style={styles.featurePill}>🌊 Ocean View</Text>
@@ -281,7 +290,7 @@ export default function ManagerDashboardScreen() {
       {/* Footer Navigation */}
       <View style={styles.footer}>
         <AppButton
-          title="Sign Out to Welcome"
+          title="Sign Out"
           variant="outline"
           size="md"
           onPress={handleSignOut}

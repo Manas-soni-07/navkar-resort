@@ -4,28 +4,31 @@ import { useRouter } from 'expo-router';
 import { Mail, Lock, Shield, User, ArrowRight } from 'lucide-react-native';
 import { ScreenContainer, AppHeader, AppButton, AppInput, AppCard } from '@/components/ui';
 import { colors, spacing, typography, borderRadius } from '@/theme';
-import { useAuth } from '@/context/AuthContext';
-import type { UserRole } from '@resortos/shared';
+import { useAuth, homeRouteFor } from '@/context/AuthContext';
+
+// Demo accounts from apps/api/prisma/seed.mjs — pre-filled in development builds only,
+// never shipped in a release build.
+const DEV_CREDENTIALS: Record<'ADMIN' | 'MANAGER', { email: string; password: string }> = {
+  ADMIN: { email: 'admin@resortos.com', password: 'admin12345' },
+  MANAGER: { email: 'manager.villa@resortos.com', password: 'manager12345' },
+};
 
 export default function LoginScreen() {
   const router = useRouter();
   const { login } = useAuth();
 
-  const [selectedRole, setSelectedRole] = useState<UserRole>('MANAGER');
-  const [email, setEmail] = useState('manager@resortos.com');
-  const [password, setPassword] = useState('manager12345');
+  const [selectedRole, setSelectedRole] = useState<'ADMIN' | 'MANAGER'>('MANAGER');
+  const [email, setEmail] = useState(__DEV__ ? DEV_CREDENTIALS.MANAGER.email : '');
+  const [password, setPassword] = useState(__DEV__ ? DEV_CREDENTIALS.MANAGER.password : '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleRoleChange = (role: UserRole) => {
+  const handleRoleChange = (role: 'ADMIN' | 'MANAGER') => {
     setSelectedRole(role);
     setErrorMessage(null);
-    if (role === 'ADMIN') {
-      setEmail('admin@resortos.com');
-      setPassword('admin12345');
-    } else {
-      setEmail('manager@resortos.com');
-      setPassword('manager12345');
+    if (__DEV__) {
+      setEmail(DEV_CREDENTIALS[role].email);
+      setPassword(DEV_CREDENTIALS[role].password);
     }
   };
 
@@ -39,12 +42,10 @@ export default function LoginScreen() {
     setIsSubmitting(true);
 
     try {
-      const loggedUser = await login(email.trim(), password.trim());
-      if (loggedUser.role === 'ADMIN' || loggedUser.role === 'SUPER_ADMIN') {
-        router.replace('/admin');
-      } else {
-        router.replace('/manager');
-      }
+      // The server verifies the account's real role and rejects a portal mismatch;
+      // navigation follows the role the server returned, not the tab selected here.
+      const loggedUser = await login(email.trim(), password, selectedRole);
+      router.replace(homeRouteFor(loggedUser.role));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Invalid credentials';
       setErrorMessage(msg);
@@ -59,6 +60,7 @@ export default function LoginScreen() {
         title="Sign In"
         subtitle="ResortOS Unified Access"
         showBack
+        onBack={() => (router.canGoBack() ? router.back() : router.replace('/'))}
       />
 
       {/* Role Selection Tabs */}
@@ -114,7 +116,7 @@ export default function LoginScreen() {
           {selectedRole === 'ADMIN' ? 'Executive Login' : 'Property Manager Login'}
         </Text>
         <Text style={styles.cardHeaderSubtitle}>
-          Secure biometric & encrypted credentials authenticated via TiDB Cloud.
+          Sign in with the account your administrator created for you.
         </Text>
 
         {errorMessage && (
@@ -140,7 +142,7 @@ export default function LoginScreen() {
           onChangeText={setPassword}
           secureTextEntry
           leftIcon={<Lock size={18} color={colors.textSecondary} />}
-          helperText={`Pre-filled demo credentials for ${selectedRole}`}
+          helperText={__DEV__ ? `Development build: demo ${selectedRole} credentials pre-filled` : undefined}
         />
 
         <AppButton
@@ -156,7 +158,7 @@ export default function LoginScreen() {
       {/* Production Notice */}
       <View style={styles.noticeBox}>
         <Text style={styles.noticeText}>
-          ⚡ Connected to live TiDB Cloud Serverless MySQL database. JWT sessions protected via SecureStore.
+          Your session is stored securely on this device and is verified by the server on every request.
         </Text>
       </View>
     </ScreenContainer>

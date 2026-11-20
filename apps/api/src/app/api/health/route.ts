@@ -22,6 +22,10 @@ export async function GET() {
     dbStatus = 'error';
   }
 
+  const provider = (process.env.DATABASE_URL ?? '').includes('tidbcloud.com')
+    ? 'TiDB Cloud Serverless (MySQL)'
+    : 'MySQL';
+
   const healthData: HealthCheckResponse = {
     status: dbStatus === 'connected' ? 'ok' : 'degraded',
     service: 'ResortOS API Backend',
@@ -29,7 +33,7 @@ export async function GET() {
     environment: process.env.NODE_ENV || 'development',
     database: {
       status: dbStatus,
-      provider: 'TiDB Cloud Serverless (MySQL)',
+      provider,
       latencyMs,
     },
     uptimeSeconds,
@@ -39,7 +43,7 @@ export async function GET() {
   return successResponse(
     healthData,
     dbStatus === 'connected'
-      ? 'ResortOS API service and TiDB Cloud database are operational'
+      ? `ResortOS API service and ${provider} database are operational`
       : 'ResortOS API service is running with database degraded'
   );
 }

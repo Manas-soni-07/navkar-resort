@@ -1,19 +1,31 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
-import { successResponse, errorResponse } from '@/lib/api-response';
+import { requireAuthUser, isAdminRole } from '@/lib/auth';
+import { successResponse, errorResponse, handleRouteError } from '@/lib/api-response';
 import type { Hotel } from '@resortos/shared';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_req: NextRequest) {
+/**
+ * Returns the hotel the signed-in user should land on:
+ * - Manager: their assigned hotel (never anything else).
+ * - Admin: the oldest active hotel in their organization.
+ */
+export async function GET(req: NextRequest) {
   try {
-    const hotel = await prisma.hotel.findFirst({
-      where: { status: 'ACTIVE' },
-      orderBy: { createdAt: 'asc' },
-    });
+    const user = await requireAuthUser(req);
+
+    const hotel = isAdminRole(user.role)
+      ? await prisma.hotel.findFirst({
+          where: { organizationId: user.organizationId, status: 'ACTIVE' },
+          orderBy: { createdAt: 'asc' },
+        })
+      : user.hotelId
+        ? await prisma.hotel.findUnique({ where: { id: user.hotelId } })
+        : null;
 
     if (!hotel) {
-      return errorResponse('HOTEL_NOT_FOUND', 'No active hotel property found', 404);
+      return errorResponse('HOTEL_NOT_FOUND', 'No hotel is available for this account', 404);
     }
 
     const formatted: Hotel = {
@@ -42,7 +54,6 @@ export async function GET(_req: NextRequest) {
 
     return successResponse(formatted, 'Primary hotel loaded');
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Failed to retrieve hotel';
-    return errorResponse('HOTEL_ERROR', message, 500);
+    return handleRouteError(err, 'HOTEL_ERROR', 'Failed to retrieve hotel');
   }
 }

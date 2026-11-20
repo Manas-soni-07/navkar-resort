@@ -13,6 +13,20 @@ const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
 
 const TOKEN_KEY = 'resortos_auth_token';
+const REQUEST_TIMEOUT_MS = 15000;
+
+/** Error carrying the HTTP status (0 = network failure / no response). */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+  }
+}
 
 export async function getStoredToken(): Promise<string | null> {
   try {
@@ -54,29 +68,50 @@ async function request<T>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const url = `${API_BASE_URL}${endpoint}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-  const response = await fetch(url, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+    });
+  } catch {
+    throw new ApiError(
+      `Cannot reach the ResortOS server at ${API_BASE_URL}. Check your connection and EXPO_PUBLIC_API_URL.`,
+      0,
+      'NETWORK_ERROR'
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
 
-  const json: ApiResponse<T> = await response.json();
+  let json: ApiResponse<T> | null = null;
+  try {
+    json = (await response.json()) as ApiResponse<T>;
+  } catch {
+    // Non-JSON body (proxy error page, server crash, wrong URL)
+  }
 
-  if (!response.ok || !json.success) {
-    const errorMessage = json.error?.message || json.message || 'Request failed';
-    throw new Error(errorMessage);
+  if (!response.ok || !json?.success) {
+    const message =
+      json?.error?.message || json?.message || `Request failed (HTTP ${response.status})`;
+    throw new ApiError(message, response.status, json?.error?.code);
   }
 
   return json.data as T;
 }
 
+export type LoginPortal = 'ADMIN' | 'MANAGER';
+
 export const api = {
   // Auth
-  login: async (email: string, password: string): Promise<AuthSession> => {
+  login: async (email: string, password: string, role?: LoginPortal): Promise<AuthSession> => {
     return request<AuthSession>('/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, role }),
     });
   },
 
@@ -94,15 +129,15 @@ export const api = {
   },
 
   getHotelDashboard: async (hotelId: string): Promise<DashboardStats> => {
-    return request<DashboardStats>(`/hotels/${hotelId}/dashboard`, {
+    return request<DashboardStats>(`/hotels/${encodeURIComponent(hotelId)}/dashboard`, {
       method: 'GET',
     });
   },
 
   // Rooms
   getRooms: async (hotelId: string, status?: RoomStatus): Promise<Room[]> => {
-    const query = status ? `?status=${status}` : '';
-    return request<Room[]>(`/hotels/${hotelId}/rooms${query}`, {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    return request<Room[]>(`/hotels/${encodeURIComponent(hotelId)}/rooms${query}`, {
       method: 'GET',
     });
   },
@@ -112,7 +147,7 @@ export const api = {
     status: RoomStatus,
     remarks?: string
   ): Promise<Room> => {
-    return request<Room>(`/rooms/${roomId}/status`, {
+    return request<Room>(`/rooms/${encodeURIComponent(roomId)}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ status, remarks }),
     });

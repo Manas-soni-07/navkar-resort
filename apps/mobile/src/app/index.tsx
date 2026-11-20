@@ -1,12 +1,30 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Building2, ShieldCheck, UserCheck, ArrowRight, Sparkles } from 'lucide-react-native';
-import { ScreenContainer, AppButton, AppCard } from '@/components/ui';
+import { ScreenContainer, AppButton, AppCard, LoadingView } from '@/components/ui';
 import { colors, spacing, typography, borderRadius } from '@/theme';
+import { useAuth, homeRouteFor } from '@/context/AuthContext';
 
 export default function WelcomeScreen() {
   const router = useRouter();
+  const { user, isLoading } = useAuth();
+  const restoreHandled = useRef(false);
+
+  // Session restoration: once the stored token has been checked at app launch,
+  // send a signed-in user straight to their dashboard. Runs only once, so it
+  // doesn't interfere with the normal sign-in / sign-out navigation later.
+  useEffect(() => {
+    if (isLoading || restoreHandled.current) return;
+    restoreHandled.current = true;
+    if (user) {
+      router.replace(homeRouteFor(user.role));
+    }
+  }, [isLoading, user, router]);
+
+  if (isLoading) {
+    return <LoadingView message="Restoring your session..." />;
+  }
 
   return (
     <ScreenContainer scrollable contentContainerStyle={styles.container}>
