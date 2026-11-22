@@ -2,7 +2,7 @@
   "expo": {
     "name": "ResortOS",
     "slug": "resortos",
-    "version": "1.0.1",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "resortos",
@@ -19,18 +19,19 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#F8F9FA"
+        "backgroundColor": "#0F2942",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.resortos.app",
-      "versionCode": 2
+      "versionCode": 3
     },
     "web": {
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
     },
     "plugins": [
-      "expo-router",
       "expo-secure-store",
       [
         "expo-build-properties",
@@ -40,6 +41,7 @@
           }
         }
       ]
-    ]
+    ],
+    "description": "Hotel & resort management for The Villa and Navkar Palace"
   }
 }
