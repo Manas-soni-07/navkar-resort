@@ -10,7 +10,7 @@ type Pool = mysql.Pool;
 const globalForPool = globalThis as unknown as { mobilePool?: Pool };
 
 function createPool(): Pool {
-  const raw = process.env.DATABASE_URL;
+  const raw = process.env.DATABASE_URL?.trim().replace(/^["']+|["']+$/g, '').trim();
   if (!raw) throw new Error('DATABASE_URL is not set');
   const u = new URL(raw);
   const isTiDB = /tidbcloud\.com$/i.test(u.hostname);
