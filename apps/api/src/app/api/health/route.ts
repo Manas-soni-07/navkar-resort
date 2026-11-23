@@ -11,6 +11,7 @@ export async function GET() {
 
   let dbStatus: 'connected' | 'disconnected' | 'error' = 'disconnected';
   let latencyMs: number | undefined;
+  let errorCode: string | undefined;
 
   try {
     const dbStart = Date.now();
@@ -20,6 +21,13 @@ export async function GET() {
   } catch (error) {
     console.error('Database health probe error:', error);
     dbStatus = 'error';
+    // Safe to expose: error class + Prisma error code only (e.g. P1000 = bad credentials,
+    // P1001 = unreachable, P1013 = malformed URL). Never the message, which can echo the URL.
+    const e = error as { name?: string; errorCode?: string; code?: string; message?: string };
+    const engineMissing = /could not locate the Query Engine|Query Engine library/i.test(e.message ?? '');
+    errorCode = [e.name, e.errorCode ?? e.code, engineMissing ? 'ENGINE_NOT_FOUND' : undefined]
+      .filter(Boolean)
+      .join(':');
   }
 
   const provider = (process.env.DATABASE_URL ?? '').includes('tidbcloud.com')
@@ -35,6 +43,7 @@ export async function GET() {
       status: dbStatus,
       provider,
       latencyMs,
+      ...(errorCode ? { errorCode } : {}),
     },
     uptimeSeconds,
     timestamp: new Date().toISOString(),

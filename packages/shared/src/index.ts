@@ -160,6 +160,8 @@ export interface DatabaseHealth {
   status: 'connected' | 'disconnected' | 'error';
   provider: string;
   latencyMs?: number;
+  /** On failure: error class and code only, e.g. "PrismaClientInitializationError:P1000". */
+  errorCode?: string;
 }
 
 export interface HealthCheckResponse {
