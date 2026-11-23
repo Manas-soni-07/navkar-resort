@@ -99,6 +99,11 @@ export async function enforcePolicy(ctx: MobileContext, req: MobileRequest): Pro
     }
   }
 
+  // Writes that act on a staff member must name one (otherwise the handler hits a DB constraint).
+  if (req.method === 'POST' && (req.path === '/attendance' || req.path === '/salaries/pay') && !body?.staffId) {
+    throw new PolicyError(400, 'A staff member (staffId) is required.');
+  }
+
   // Rows referenced from the body.
   if (body) {
     for (const [field, table] of BODY_REFS) {
