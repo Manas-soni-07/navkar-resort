@@ -36,7 +36,7 @@ export const ShiftHandoverScreen: React.FC = () => {
   } = useHotel();
 
   const [showAddModal, setShowAddModal] = useState(false);
-  const [outgoingManager, setOutgoingManager] = useState('Vikramaditya Rathore');
+  const [outgoingManager, setOutgoingManager] = useState('Yash Godha');
   const [incomingManager, setIncomingManager] = useState('Sunita Sharma');
   const [shiftFrom, setShiftFrom] = useState<'Morning' | 'Afternoon' | 'Night'>('Morning');
   const [shiftTo, setShiftTo] = useState<'Morning' | 'Afternoon' | 'Night'>('Afternoon');

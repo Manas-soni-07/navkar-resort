@@ -459,7 +459,7 @@ export const BanquetEventsScreen: React.FC = () => {
               <View style={styles.formRow}>
                 <Input
                   label="Host / Client Name"
-                  placeholder="e.g. Vikramaditya Rathore"
+                  placeholder="e.g. Yash Godha"
                   value={clientName}
                   onChangeText={setClientName}
                   containerStyle={{ flex: 1, marginRight: spacing.xs }}

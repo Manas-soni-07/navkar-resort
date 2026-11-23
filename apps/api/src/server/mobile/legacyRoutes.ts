@@ -1,6 +1,6 @@
 // @ts-nocheck
 /*
- * Ported verbatim from mobile-nav (branch `manas`) server/routes/api.js.
+ * Ported verbatim from mobile-nav (branch `manas`) server/routes/api.js @ 8627ca6.
  * Removed here and re-implemented securely in secureRoutes.ts:
  *   POST /auth/login, GET /auth/me, POST /managers, PATCH /managers/:id/password
  * Authentication, hotel isolation and error masking are applied by the
@@ -15,6 +15,7 @@
 
 import { MobileRouter } from './router';
 import pool from './db';
+import * as XLSX from 'xlsx';
 
 const router = new MobileRouter();
 
@@ -531,15 +532,47 @@ router.patch('/bookings/:id/checkin', async (req, res) => {
     if (bookings.length === 0) return res.status(404).json({ error: 'Booking not found' });
     const b = bookings[0];
 
-    await pool.query(
-      `UPDATE bookings 
-       SET status = 'CHECKED_IN', roomId = COALESCE(?, roomId), roomNumber = COALESCE(?, roomNumber), updatedAt = NOW() 
-       WHERE id = ?`,
-      [roomId, roomNumber, bookingId]
-    );
-
     const targetRoomId = roomId || b.roomId;
     const targetRoomNumber = roomNumber || b.roomNumber;
+
+    // If guestKyc provided, persist to guests table and link to booking
+    if (guestKyc && (guestKyc.idNumber || guestKyc.idType || guestKyc.cityOfOrigin)) {
+      if (b.guestId) {
+        await pool.query(
+          `UPDATE guests 
+           SET idType = COALESCE(?, idType), idNumber = COALESCE(?, idNumber), city = COALESCE(?, city), updatedAt = NOW()
+           WHERE id = ?`,
+          [guestKyc.idType || null, guestKyc.idNumber || null, guestKyc.cityOfOrigin || null, b.guestId]
+        );
+      } else {
+        const newGuestId = `gst-${Date.now()}`;
+        const nameParts = (b.guestName || '').trim().split(' ');
+        const firstName = nameParts[0] || 'Guest';
+        const lastName = nameParts.slice(1).join(' ') || '';
+        await pool.query(
+          `INSERT INTO guests (id, organizationId, firstName, lastName, email, phone, idType, idNumber, nationality, city, country, createdAt, updatedAt)
+           VALUES (?, 'org-resortos', ?, ?, ?, ?, ?, ?, 'Indian', ?, 'India', NOW(), NOW())`,
+          [
+            newGuestId,
+            firstName,
+            lastName,
+            b.guestEmail || '',
+            b.guestPhone || '',
+            guestKyc.idType || null,
+            guestKyc.idNumber || null,
+            guestKyc.cityOfOrigin || null,
+          ]
+        );
+        b.guestId = newGuestId;
+      }
+    }
+
+    await pool.query(
+      `UPDATE bookings 
+       SET status = 'CHECKED_IN', roomId = COALESCE(?, roomId), roomNumber = COALESCE(?, roomNumber), guestId = COALESCE(?, guestId), updatedAt = NOW() 
+       WHERE id = ?`,
+      [roomId, roomNumber, b.guestId || null, bookingId]
+    );
 
     if (targetRoomId) {
       await pool.query(
@@ -1632,6 +1665,169 @@ router.get('/sync/summary', async (req, res) => {
         shiftHandovers: shift[0].c,
       },
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// 15. COMPLETE HISTORICAL GUEST EXPORT (EXCEL / XLSX)
+// ==========================================
+router.get('/reports/guests/export', async (req, res) => {
+  try {
+    const { hotelId, format } = req.query;
+
+    if (!hotelId || (hotelId !== 'h-villa' && hotelId !== 'h-navkar')) {
+      return res.status(400).json({
+        error: "Missing or invalid hotelId. Please specify 'h-villa' or 'h-navkar'.",
+      });
+    }
+
+    if (!checkHotelAccess(req, res, hotelId)) return;
+
+    // Retrieve ALL existing guest records for the hotel:
+    // 1. All historical and current bookings from `bookings` (joined with `guests`, `rooms`, `invoices`, `hotels`)
+    // 2. UNION ALL any active in-house room check-ins from `rooms` not yet present in `bookings`
+    const query = `
+      SELECT 
+        b.id AS bookingId,
+        b.hotelId,
+        h.name AS hotelName,
+        COALESCE(b.bookingReference, b.id) AS bookingReference,
+        b.guestName,
+        COALESCE(b.guestPhone, g.phone, '') AS guestPhone,
+        COALESCE(b.guestEmail, g.email, '') AS guestEmail,
+        COALESCE(b.roomNumber, r.roomNumber, '') AS roomNumber,
+        COALESCE(b.roomCategory, b.roomType, r.category, '') AS roomCategory,
+        DATE_FORMAT(b.checkInDate, '%Y-%m-%d') AS checkInDate,
+        DATE_FORMAT(b.checkOutDate, '%Y-%m-%d') AS checkOutDate,
+        COALESCE(b.nightsCount, DATEDIFF(b.checkOutDate, b.checkInDate), 1) AS nightsCount,
+        COALESCE(b.totalGuests, 1) AS numberOfGuests,
+        b.status AS bookingStatus,
+        CAST(COALESCE(b.totalAmount, 0) AS DECIMAL(12,2)) AS totalAmount,
+        CAST(COALESCE(b.depositPaid, b.advanceAmount, 0) AS DECIMAL(12,2)) AS depositPaid,
+        COALESCE(b.paymentStatus, CASE WHEN b.depositPaid >= b.totalAmount THEN 'paid' ELSE 'partial' END) AS paymentStatus,
+        COALESCE(b.paymentMethod, 'UPI') AS paymentMethod,
+        COALESCE(b.bookingType, 'normal') AS bookingType,
+        COALESCE(g.idType, '') AS idType,
+        COALESCE(g.idNumber, '') AS idNumber,
+        COALESCE(g.city, '') AS cityOfOrigin,
+        COALESCE(b.notes, g.specialRequests, '') AS notes,
+        DATE_FORMAT(b.createdAt, '%Y-%m-%d %H:%i') AS createdAt
+      FROM bookings b
+      JOIN hotels h ON b.hotelId = h.id
+      LEFT JOIN guests g ON b.guestId = g.id
+      LEFT JOIN rooms r ON b.roomId = r.id
+      WHERE b.hotelId = ?
+
+      UNION ALL
+
+      SELECT 
+        COALESCE(r.currentBookingId, CONCAT('rm-stay-', r.roomNumber)) AS bookingId,
+        r.hotelId,
+        h.name AS hotelName,
+        CONCAT(h.code, '-ROOM-', r.roomNumber) AS bookingReference,
+        r.currentGuestName AS guestName,
+        '' AS guestPhone,
+        '' AS guestEmail,
+        r.roomNumber,
+        r.category AS roomCategory,
+        DATE_FORMAT(r.updatedAt, '%Y-%m-%d') AS checkInDate,
+        DATE_FORMAT(DATE_ADD(r.updatedAt, INTERVAL 3 DAY), '%Y-%m-%d') AS checkOutDate,
+        3 AS nightsCount,
+        2 AS numberOfGuests,
+        'CHECKED_IN' AS bookingStatus,
+        CAST(COALESCE(r.ratePerNight * 3, 0) AS DECIMAL(12,2)) AS totalAmount,
+        CAST(COALESCE(r.ratePerNight * 3, 0) AS DECIMAL(12,2)) AS depositPaid,
+        'paid' AS paymentStatus,
+        'UPI' AS paymentMethod,
+        'normal' AS bookingType,
+        '' AS idType,
+        '' AS idNumber,
+        '' AS cityOfOrigin,
+        'In-house occupied room check-in' AS notes,
+        DATE_FORMAT(r.updatedAt, '%Y-%m-%d %H:%i') AS createdAt
+      FROM rooms r
+      JOIN hotels h ON r.hotelId = h.id
+      WHERE r.hotelId = ?
+        AND r.status IN ('OCCUPIED', 'CLEANING')
+        AND r.currentGuestName IS NOT NULL 
+        AND r.currentGuestName != ''
+        AND r.currentGuestName NOT IN (SELECT guestName FROM bookings WHERE hotelId = r.hotelId)
+        AND (r.currentBookingId IS NULL OR r.currentBookingId NOT IN (SELECT id FROM bookings WHERE hotelId = r.hotelId))
+
+      ORDER BY createdAt ASC, checkInDate ASC
+    `;
+
+    const [rows] = await pool.query(query, [hotelId, hotelId]);
+
+    const hotelName = hotelId === 'h-villa' ? 'THE VILLA' : 'NAVKAR PALACE & RESORT';
+    const hotelCode = hotelId === 'h-villa' ? 'The_Villa' : 'Navkar_Palace';
+    const today = new Date().toISOString().split('T')[0];
+
+    if (format === 'json') {
+      return res.json({
+        success: true,
+        hotelId,
+        hotelName,
+        totalRecords: rows.length,
+        exportedAt: new Date().toISOString(),
+        records: rows,
+      });
+    }
+
+    // Build Excel Workbook via xlsx
+    
+
+    const excelData = rows.map((r, index) => ({
+      'S.No': index + 1,
+      'Booking Reference': r.bookingReference,
+      'Guest Name': r.guestName,
+      'Phone Number': r.guestPhone || 'N/A',
+      'Email Address': r.guestEmail || 'N/A',
+      'Property': r.hotelName,
+      'Room Number': r.roomNumber || 'Unassigned',
+      'Room Category': r.roomCategory || 'N/A',
+      'Check-In Date': r.checkInDate,
+      'Check-Out Date': r.checkOutDate,
+      'Nights': Number(r.nightsCount),
+      'Guests': Number(r.numberOfGuests),
+      'Status': r.bookingStatus,
+      'Total Amount (₹)': Number(r.totalAmount),
+      'Deposit Paid (₹)': Number(r.depositPaid),
+      'Payment Status': r.paymentStatus,
+      'Payment Method': r.paymentMethod,
+      'Booking Type': r.bookingType,
+      'Govt ID Type': r.idType || 'N/A',
+      'Govt ID Number': r.idNumber || 'N/A',
+      'City of Origin': r.cityOfOrigin || 'N/A',
+      'Special Notes': r.notes || 'None',
+      'Created At': r.createdAt,
+    }));
+
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(excelData);
+
+    const colWidths = Object.keys(excelData[0] || {}).map((key) => {
+      let maxLen = key.length;
+      excelData.forEach((row) => {
+        const val = row[key] ? String(row[key]) : '';
+        if (val.length > maxLen) maxLen = val.length;
+      });
+      return { wch: Math.min(Math.max(maxLen + 2, 10), 45) };
+    });
+    ws['!cols'] = colWidths;
+
+    const sheetName = hotelId === 'h-villa' ? 'The Villa - Guests' : 'Navkar Palace - Guests';
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+
+    const excelBuffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const fileName = `${hotelCode}_Complete_Guest_History_${today}.xlsx`;
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Content-Length', excelBuffer.length);
+    res.send(excelBuffer);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -100,10 +100,16 @@ export const LoginScreen: React.FC = () => {
           });
         }
       } else {
+        if (__DEV__) {
+          console.warn('[LoginScreen] Login rejected:', result.error);
+        }
         setErrorMessage(result.error || 'Authentication failed. Please verify your credentials.');
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Connection error. Please try again.';
+      if (__DEV__) {
+        console.error('[LoginScreen] Login exception caught:', msg);
+      }
       setErrorMessage(msg);
     } finally {
       setLoading(false);

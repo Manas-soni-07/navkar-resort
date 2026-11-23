@@ -10,7 +10,7 @@ import { View, StyleSheet, ViewStyle } from 'react-native';
 import {
   Activity, ArrowLeft, Bed, Building, Calendar, ChartColumn, Check, ChevronDown, ChevronLeft,
   ChevronRight, Circle, CircleAlert, CircleArrowDown, CircleCheck, Clock, CreditCard, Database,
-  DollarSign, Eye, EyeOff, FileText, Filter, Globe, Hotel, Info, Key, Layers, LayoutGrid, Lock,
+  DollarSign, Download, Eye, EyeOff, FileText, Filter, Globe, Hotel, Info, Key, Layers, LayoutGrid, Lock,
   LogIn, LogOut, Mail, MapPin, Phone, Plus, Receipt, RefreshCw, RotateCcw, Search, Settings,
   Share2, Shield, SquarePen, TrendingDown, TrendingUp, TriangleAlert, User, UserCheck, Users, X,
   type LucideIcon,
@@ -32,7 +32,7 @@ const LUCIDE: Record<string, LucideIcon> = {
   'user-check': UserCheck, 'arrow-down-circle': CircleArrowDown, 'bar-chart-2': ChartColumn,
   database: Database, settings: Settings, filter: Filter, layers: Layers, globe: Globe,
   'map-pin': MapPin, phone: Phone, edit: SquarePen, 'rotate-ccw': RotateCcw, info: Info,
-  search: Search, 'share-2': Share2, 'file-text': FileText, circle: Circle,
+  search: Search, download: Download, 'share-2': Share2, 'file-text': FileText, circle: Circle,
 };
 
 export type IconName =

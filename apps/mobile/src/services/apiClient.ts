@@ -40,7 +40,7 @@ export class ApiClient {
   }
 
   public getBaseUrl(): string {
-    return this.baseUrl;
+    return apiConfig.getBaseUrl();
   }
 
   public getNetworkConfig(): NetworkConfig {
@@ -66,6 +66,7 @@ export class ApiClient {
   private getHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      'Accept': 'application/json',
     };
     if (this.authToken) {
       headers['Authorization'] = `Bearer ${this.authToken}`;
@@ -84,8 +85,15 @@ export class ApiClient {
     options: RequestInit & { timeoutMs?: number } = {},
     retries: number = options.method && options.method !== 'GET' ? 0 : 2
   ): Promise<T> {
-    const url = `${this.baseUrl}${endpoint}`;
+    const activeBaseUrl = this.getBaseUrl();
+    const url = `${activeBaseUrl}${endpoint}`;
     const timeoutMs = options.timeoutMs ?? (endpoint.includes('/auth') ? 30000 : this.requestTimeoutMs);
+
+    if (__DEV__) {
+      console.log(`[API DEV LOG] 📡 Outgoing Request: ${options.method || 'GET'} ${endpoint}`);
+      console.log(`[API DEV LOG]    Resolved Base URL: ${activeBaseUrl}`);
+      console.log(`[API DEV LOG]    Target URL:        ${url}`);
+    }
 
     // Fresh AbortController for each individual attempt
     const controller = new AbortController();
@@ -110,6 +118,10 @@ export class ApiClient {
         },
       });
       clearTimeout(timeoutId);
+
+      if (__DEV__) {
+        console.log(`[API DEV LOG] 📥 Response Status: HTTP ${response.status} ${response.statusText} for ${endpoint}`);
+      }
 
       if (!response.ok) {
         let backendErrorMsg = '';
@@ -158,6 +170,16 @@ export class ApiClient {
     } catch (err: any) {
       clearTimeout(timeoutId);
 
+      if (__DEV__) {
+        console.error(`[API DEV LOG] ❌ Network/Request Error for ${endpoint}:`, {
+          resolvedBaseUrl: activeBaseUrl,
+          targetUrl: url,
+          errorName: err?.name,
+          errorMessage: err?.message,
+          isTimeout: isTimeoutTriggered,
+        });
+      }
+
       const errMessage = (err?.message || '').toLowerCase();
       const errName = err?.name || '';
       const isAborted =
@@ -174,7 +196,7 @@ export class ApiClient {
           return this.request<T>(endpoint, fetchOptions, retries - 1);
         }
         throw new Error(
-          `Request timeout: Connection to backend at ${this.baseUrl} timed out after ${
+          `Request timeout: Connection to backend at ${activeBaseUrl} timed out after ${
             timeoutMs / 1000
           }s. Please verify your phone and computer are on the same Wi-Fi network.`
         );
@@ -187,7 +209,7 @@ export class ApiClient {
           return this.request<T>(endpoint, fetchOptions, retries - 1);
         }
         throw new Error(
-          `Request was interrupted or cancelled while connecting to ${this.baseUrl}. Please retry.`
+          `Request was interrupted or cancelled while connecting to ${activeBaseUrl}. Please retry.`
         );
       }
 
@@ -196,6 +218,9 @@ export class ApiClient {
         errMessage.includes('network request failed') ||
         errMessage.includes('failed to connect') ||
         errMessage.includes('connectexception') ||
+        errMessage.includes('noroutetohostexception') ||
+        errMessage.includes('host unreachable') ||
+        errMessage.includes('no route to host') ||
         errMessage.includes('econnrefused') ||
         errMessage.includes('enotfound');
 
@@ -204,8 +229,9 @@ export class ApiClient {
           await new Promise((res) => setTimeout(res, 800));
           return this.request<T>(endpoint, fetchOptions, retries - 1);
         }
+        const netConfig = this.getNetworkConfig();
         throw new Error(
-          `Network connection failed: Unable to reach backend server at ${this.baseUrl}.\n\nPlease check:\n1. Backend server is running.\n2. Mobile phone and PC are on the same Wi-Fi network.\n3. PC Windows Firewall allows incoming connections to the API port.`
+          `Network connection failed: Unable to reach backend server at ${activeBaseUrl} (Source: ${netConfig.source}).\n\nUnderlying Error: ${err?.message || 'Host unreachable'}\n\nPlease check your internet connection and try again.`
         );
       }
 
@@ -215,10 +241,34 @@ export class ApiClient {
 
   // --- Auth ---
   public async login(email: string, password: string, role?: string): Promise<{ success: boolean; token: string; user: CurrentUser }> {
+    if (__DEV__) {
+      console.log(`[API DEV LOG] 🔐 Login attempt for user: "${email}" | Requested Role: "${role || 'N/A'}" (password redacted)`);
+    }
     return this.request('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password, role }),
     });
+  }
+
+  // --- Historical Guest Export (Excel) ---
+  /**
+   * The browser that downloads the file cannot send our Authorization header, so the server
+   * issues a short-lived (5 min), single-hotel signed download link instead.
+   */
+  public async getGuestExportUrl(hotelId: string): Promise<string> {
+    const res = await this.request<{ url: string }>(`/reports/guests/export-link?hotelId=${encodeURIComponent(hotelId)}`);
+    return res.url;
+  }
+
+  public async getGuestExportSummary(hotelId: string): Promise<{
+    success: boolean;
+    hotelId: string;
+    hotelName: string;
+    totalRecords: number;
+    exportedAt: string;
+    records: any[];
+  }> {
+    return this.request(`/reports/guests/export?hotelId=${encodeURIComponent(hotelId)}&format=json`);
   }
 
   /** Validates the current token and returns the signed-in user as the server sees it. */

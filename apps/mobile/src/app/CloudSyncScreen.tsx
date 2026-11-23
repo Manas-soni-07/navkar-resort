@@ -19,6 +19,7 @@ import { Badge } from '../components/common/Badge';
 import { Icon } from '../components/common/Icon';
 import { Button } from '../components/common/Button';
 import { cloudSyncService, ClusterHealthInfo, SyncSummaryResponse } from '../services/cloudSyncService';
+import { apiConfig } from '../config/apiConfig';
 
 export const CloudSyncScreen: React.FC = () => {
   const { goBack } = useNavigation();
@@ -129,7 +130,7 @@ export const CloudSyncScreen: React.FC = () => {
           </View>
           <Text style={styles.networkEndpoint}>{cloudSyncService.getBaseUrl()}</Text>
           <Text style={styles.networkSub}>
-            Physical Device • Wi-Fi LAN IP (192.168.1.26:5000)
+            {`Dynamic Resolution • ${apiConfig.getConfig().source} (${apiConfig.getConfig().host}:${apiConfig.getConfig().port})`}
           </Text>
         </View>
 

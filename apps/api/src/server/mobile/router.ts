@@ -16,9 +16,14 @@ export interface MobileRequest {
 export interface MobileResponse {
   statusCode: number;
   body: unknown;
+  /** Raw (non-JSON) payload set via send(), e.g. an .xlsx file. */
+  raw?: Uint8Array | string;
+  headers: Record<string, string>;
   headersSent: boolean;
   status(code: number): MobileResponse;
   json(body: unknown): MobileResponse;
+  setHeader(name: string, value: string | number): MobileResponse;
+  send(body: Uint8Array | string): MobileResponse;
 }
 
 export type Handler = (req: MobileRequest, res: MobileResponse) => unknown | Promise<unknown>;
@@ -70,6 +75,7 @@ export function createResponse(): MobileResponse {
   const res: MobileResponse = {
     statusCode: 200,
     body: undefined,
+    headers: {},
     headersSent: false,
     status(code) {
       res.statusCode = code;
@@ -77,6 +83,15 @@ export function createResponse(): MobileResponse {
     },
     json(body) {
       res.body = body;
+      res.headersSent = true;
+      return res;
+    },
+    setHeader(name, value) {
+      res.headers[name] = String(value);
+      return res;
+    },
+    send(body) {
+      res.raw = body;
       res.headersSent = true;
       return res;
     },

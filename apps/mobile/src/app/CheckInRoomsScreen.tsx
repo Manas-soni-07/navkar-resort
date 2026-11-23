@@ -17,6 +17,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
@@ -31,6 +32,7 @@ import { Icon } from '../components/common/Icon';
 import { Button } from '../components/common/Button';
 import { formatCurrency } from '../utils/formatters';
 import { Room, Booking } from '../types/hotel';
+import { apiClient } from '../services/apiClient';
 
 interface ExtraChargeItem {
   id: string;
@@ -427,6 +429,37 @@ export const CheckInRoomsScreen: React.FC = () => {
     Alert.alert('Room Cleaned', `Room ${roomNum} is now inspected and Available for check-in.`);
   };
 
+  // Complete Historical Guest Export Handler
+  const [exporting, setExporting] = useState<boolean>(false);
+
+  const handleExportGuests = async () => {
+    setExporting(true);
+    try {
+      const summary = await apiClient.getGuestExportSummary(selectedHotel.id);
+      const exportUrl = await apiClient.getGuestExportUrl(selectedHotel.id);
+
+      Alert.alert(
+        'Export Historical Guest Records',
+        `Property: ${summary.hotelName}\nTotal Records: ${summary.totalRecords} guests\n\nDownload complete historical Excel workbook?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Download Excel (.xlsx)',
+            onPress: () => {
+              Linking.openURL(exportUrl).catch((err) => {
+                Alert.alert('Download Error', `Could not open browser: ${err.message}`);
+              });
+            },
+          },
+        ]
+      );
+    } catch (err: any) {
+      Alert.alert('Export Failed', err.message || 'Unable to retrieve guest export.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <Header
@@ -436,12 +469,23 @@ export const CheckInRoomsScreen: React.FC = () => {
         showBack
         onBack={goBack}
         rightAction={
-          <Button
-            title="+ Walk-in Check-in"
-            size="sm"
-            variant="primary"
-            onPress={handleOpenWalkIn}
-          />
+          <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+            <TouchableOpacity
+              style={styles.exportHeaderBtn}
+              onPress={handleExportGuests}
+              disabled={exporting}
+              activeOpacity={0.8}
+            >
+              <Icon name="download" size={13} color={colors.primaryNavy} />
+              <Text style={styles.exportHeaderBtnText}>Excel</Text>
+            </TouchableOpacity>
+            <Button
+              title="+ Walk-in"
+              size="sm"
+              variant="primary"
+              onPress={handleOpenWalkIn}
+            />
+          </View>
         }
       />
 
@@ -1665,6 +1709,23 @@ const styles = StyleSheet.create({
   modalSaveBtn: {
     marginTop: spacing.md,
     marginBottom: spacing.md,
+  },
+  exportHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.primaryTint,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: '#CBD5E1',
+  },
+  exportHeaderBtnText: {
+    ...typography.captionMedium,
+    color: colors.primaryNavy,
+    fontWeight: '700',
+    fontSize: 11,
   },
 });
 

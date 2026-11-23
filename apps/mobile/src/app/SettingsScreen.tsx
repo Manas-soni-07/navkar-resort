@@ -59,7 +59,7 @@ export const SettingsScreen: React.FC = () => {
               <Icon name="shield" size={28} color={colors.primaryNavy} />
             </View>
             <View style={styles.profileInfo}>
-              <Text style={styles.userName}>{currentUser?.fullName || 'Vikramaditya Rathore'}</Text>
+              <Text style={styles.userName}>{currentUser?.fullName || 'Yash Godha'}</Text>
               <Text style={styles.userEmail}>{currentUser?.email || 'admin@resortos.com'}</Text>
               <Badge label="SYSTEM ADMINISTRATOR & OWNER" variant="primary" size="sm" style={styles.roleBadge} />
             </View>

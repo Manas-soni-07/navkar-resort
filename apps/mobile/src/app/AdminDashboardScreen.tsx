@@ -13,6 +13,9 @@ import {
   TouchableOpacity,
   SafeAreaView,
   useWindowDimensions,
+  Alert,
+  Linking,
+  ActivityIndicator,
 } from 'react-native';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
@@ -26,6 +29,7 @@ import { Icon, IconName } from '../components/common/Icon';
 import { KPICard } from '../components/dashboard/KPICard';
 import { DashboardCalendar } from '../components/dashboard/DashboardCalendar';
 import { formatCurrency } from '../utils/formatters';
+import { apiClient } from '../services/apiClient';
 
 export const AdminDashboardScreen: React.FC = () => {
   const { navigate } = useNavigation();
@@ -157,6 +161,52 @@ export const AdminDashboardScreen: React.FC = () => {
       .filter((b) => b.status !== 'cancelled')
       .slice(0, 5);
   }, [targetBookings]);
+
+  // Complete Historical Guest Export Handler
+  const [exporting, setExporting] = useState<boolean>(false);
+
+  const handleExportGuests = async (targetId?: string) => {
+    const hotelIdToExport = targetId || (filterHotelId === 'all' ? selectedHotelId : filterHotelId);
+
+    if (hotelIdToExport === 'all') {
+      Alert.alert(
+        'Select Property for Export',
+        'Please select a specific hotel to download its complete guest history:',
+        [
+          { text: 'The Villa (Jaipur)', onPress: () => handleExportGuests('h-villa') },
+          { text: 'Navkar Palace (Udaipur)', onPress: () => handleExportGuests('h-navkar') },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const summary = await apiClient.getGuestExportSummary(hotelIdToExport);
+      const exportUrl = await apiClient.getGuestExportUrl(hotelIdToExport);
+
+      Alert.alert(
+        'Download Historical Guest Excel',
+        `Property: ${summary.hotelName}\nTotal Historical Records: ${summary.totalRecords} guests\n\nAll existing records from the beginning of the hotel database are included. Proceed to download Excel workbook?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Download Excel (.xlsx)',
+            onPress: () => {
+              Linking.openURL(exportUrl).catch((err) => {
+                Alert.alert('Download Error', `Could not open browser for download: ${err.message}`);
+              });
+            },
+          },
+        ]
+      );
+    } catch (err: any) {
+      Alert.alert('Export Failed', err.message || 'Unable to retrieve guest export from server.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // 11 Core Hotel Management Modules
   const adminModules: { id: string; title: string; subtitle: string; icon: IconName; screen: any; color: string }[] = [
@@ -333,6 +383,35 @@ export const AdminDashboardScreen: React.FC = () => {
             variant="primary"
             size="sm"
           />
+        </View>
+
+        {/* Complete Historical Guest Export Action Bar */}
+        <View style={styles.exportBar}>
+          <View style={styles.exportInfoCol}>
+            <View style={styles.exportBadgeRow}>
+              <Icon name="file-text" size={15} color={colors.primaryNavy} />
+              <Text style={styles.exportTitle}>Historical Guest Database</Text>
+              <Badge label="COMPLETE DATA" variant="success" size="sm" />
+            </View>
+            <Text style={styles.exportSubtitle}>
+              Export all existing check-ins, reservations & KYC records for {filterHotelId === 'h-villa' ? 'The Villa' : filterHotelId === 'h-navkar' ? 'Navkar Palace' : 'current property'} into Excel (.xlsx).
+            </Text>
+          </View>
+          <TouchableOpacity
+            style={styles.exportBtn}
+            onPress={() => handleExportGuests()}
+            disabled={exporting}
+            activeOpacity={0.8}
+          >
+            {exporting ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <>
+                <Icon name="download" size={15} color="#FFFFFF" />
+                <Text style={styles.exportBtnText}>Export Excel</Text>
+              </>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* ============================================================== */}
@@ -698,6 +777,56 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontWeight: '800',
     marginTop: 1,
+  },
+  exportBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F0FDF4',
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    ...shadows.sm,
+    gap: spacing.sm,
+  },
+  exportInfoCol: {
+    flex: 1,
+  },
+  exportBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  exportTitle: {
+    ...typography.caption,
+    color: colors.primaryNavy,
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  exportSubtitle: {
+    ...typography.caption,
+    color: '#15803D',
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  exportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#059669',
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    borderRadius: borderRadius.md,
+    ...shadows.sm,
+  },
+  exportBtnText: {
+    ...typography.captionMedium,
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 12,
   },
   mainSectionLayout: {
     flexDirection: 'column',
