@@ -315,7 +315,15 @@ export const HotelProvider: React.FC<HotelProviderProps> = ({
   );
 
   const todayArrivals = useMemo(
-    () => bookings.filter((b) => b.checkInDate === todayStr && b.status !== 'cancelled'),
+    () =>
+      bookings.filter((b) => {
+        if (b.status === 'cancelled' || b.status === 'checked_out') return false;
+        // In-house stay: any currently checked-in guest occupying a room
+        if (b.status === 'checked_in') return true;
+        // Arrival: any scheduled booking for today that has not checked in yet
+        if (b.checkInDate === todayStr) return true;
+        return false;
+      }),
     [bookings, todayStr]
   );
 

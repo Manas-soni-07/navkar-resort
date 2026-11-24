@@ -106,6 +106,7 @@ export interface Booking {
   roomId?: string;
   roomNumber?: string;
   checkInDate: string; // YYYY-MM-DD
+  checkInTime?: string;
   checkOutDate: string; // YYYY-MM-DD
   nightsCount: number;
   numberOfGuests: number;
@@ -115,6 +116,9 @@ export interface Booking {
   paymentStatus: PaymentStatus;
   specialRequests?: string;
   guestKyc?: GuestKYC;
+  idType?: string;
+  idNumber?: string;
+  city?: string;
   createdAt: string;
   bookingType?: 'normal' | 'event';
   eventName?: string;

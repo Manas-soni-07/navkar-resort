@@ -31,7 +31,7 @@ import { Badge } from '../components/common/Badge';
 import { Icon } from '../components/common/Icon';
 import { Button } from '../components/common/Button';
 import { formatCurrency } from '../utils/formatters';
-import { Room, Booking } from '../types/hotel';
+import { Room, Booking, IdProofType } from '../types/hotel';
 import { apiClient } from '../services/apiClient';
 
 interface ExtraChargeItem {
@@ -150,15 +150,25 @@ export const CheckInRoomsScreen: React.FC = () => {
     });
   }, [hotelRooms, searchQuery, roomStatusFilter]);
 
-  // Filtered arrivals
+  // Filtered arrivals & in-house stays for active hotel
   const filteredArrivals = useMemo(() => {
-    return todayArrivals.filter((a) => {
+    const list = todayArrivals.filter((a) => {
       if (a.hotelId !== selectedHotel.id) return false;
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
       return (
-        a.guestName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        a.bookingReference.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (a.roomNumber && a.roomNumber.includes(searchQuery))
+        a.guestName.toLowerCase().includes(q) ||
+        a.bookingReference.toLowerCase().includes(q) ||
+        (a.guestPhone && a.guestPhone.includes(q)) ||
+        (a.roomNumber && a.roomNumber.includes(q))
       );
+    });
+
+    // In-house stays first, then upcoming arrivals for today; secondary sort by roomNumber
+    return list.sort((a, b) => {
+      if (a.status === 'checked_in' && b.status !== 'checked_in') return -1;
+      if (a.status !== 'checked_in' && b.status === 'checked_in') return 1;
+      return (a.roomNumber || '999').localeCompare(b.roomNumber || '999', undefined, { numeric: true });
     });
   }, [todayArrivals, selectedHotel.id, searchQuery]);
 
@@ -224,7 +234,7 @@ export const CheckInRoomsScreen: React.FC = () => {
   };
 
   // --- Walk-in Submission Handler ---
-  const handleWalkInCheckIn = () => {
+  const handleWalkInCheckIn = async () => {
     if (!walkInGuestName.trim()) {
       Alert.alert('Required Field', 'Please enter guest full name');
       return;
@@ -257,34 +267,54 @@ export const CheckInRoomsScreen: React.FC = () => {
     const advanceAmt = parseFloat(walkInAdvance) || 0;
     const payStatus: 'paid' | 'partial' | 'unpaid' = advanceAmt >= totalAmt ? 'paid' : advanceAmt > 0 ? 'partial' : 'unpaid';
 
-    // Create a confirmed booking and immediately check-in
-    createBooking({
-      hotelId: selectedHotel.id,
-      guestName: walkInGuestName.trim(),
-      guestPhone: walkInPhone.trim(),
-      guestEmail: `${walkInGuestName.toLowerCase().replace(/\s+/g, '')}@gmail.com`,
-      roomCategory: selectedWalkInRoom.category,
-      roomId: selectedWalkInRoom.id,
-      roomNumber: selectedWalkInRoom.roomNumber,
-      checkInDate: walkInCheckInDate,
-      checkOutDate: walkInCheckOutDate,
-      nightsCount: walkInNights,
-      numberOfGuests: parseInt(walkInGuestsCount, 10) || 2,
-      status: 'checked_in',
-      totalAmount: totalAmt,
-      depositPaid: advanceAmt,
-      paymentStatus: payStatus,
-      specialRequests: `Walk-in Guest. ID: ${walkInIdType} (${walkInIdNumber || 'N/A'}). ${walkInNotes}`.trim(),
-    });
+    try {
+      // Create a confirmed booking and immediately check-in
+      await createBooking({
+        hotelId: selectedHotel.id,
+        guestName: walkInGuestName.trim(),
+        guestPhone: walkInPhone.trim(),
+        guestEmail: `${walkInGuestName.toLowerCase().replace(/\s+/g, '')}@gmail.com`,
+        roomCategory: selectedWalkInRoom.category,
+        roomId: selectedWalkInRoom.id,
+        roomNumber: selectedWalkInRoom.roomNumber,
+        checkInDate: walkInCheckInDate,
+        checkOutDate: walkInCheckOutDate,
+        nightsCount: walkInNights,
+        numberOfGuests: parseInt(walkInGuestsCount, 10) || 2,
+        status: 'checked_in',
+        totalAmount: totalAmt,
+        depositPaid: advanceAmt,
+        paymentStatus: payStatus,
+        specialRequests: `Walk-in Guest. ID: ${walkInIdType} (${walkInIdNumber || 'N/A'}). ${walkInNotes}`.trim(),
+        guestKyc: {
+          idType: walkInIdType as IdProofType,
+          idNumber: walkInIdNumber.trim(),
+          cityOfOrigin: walkInAddress.trim(),
+          verificationStatus: 'verified',
+        },
+        idType: walkInIdType,
+        idNumber: walkInIdNumber.trim(),
+        city: walkInAddress.trim(),
+      });
 
-    // Mark room as occupied
-    updateRoomStatus(selectedWalkInRoom.id, 'occupied', 'clean');
+      // Switch active tab to Arrivals & In-House view to view the check-in immediately
+      setActiveTab('arrivals');
+      setShowWalkInModal(false);
 
-    setShowWalkInModal(false);
-    Alert.alert(
-      'Walk-In Successful',
-      `Guest ${walkInGuestName} successfully checked in to Room ${selectedWalkInRoom.roomNumber} (${selectedHotel.name})!`
-    );
+      // Reset walk-in input fields
+      setWalkInGuestName('');
+      setWalkInPhone('+91 ');
+      setWalkInNotes('');
+      setWalkInAddress('');
+      setWalkInIdNumber('');
+
+      Alert.alert(
+        'Walk-In Successful',
+        `Guest ${walkInGuestName} successfully checked in to Room ${selectedWalkInRoom.roomNumber} (${selectedHotel.name})!`
+      );
+    } catch (err: any) {
+      Alert.alert('Check-In Failed', err.message || 'Unable to complete walk-in check-in.');
+    }
   };
 
   // --- Check-In Existing Arrival Handler ---
@@ -550,12 +580,19 @@ export const CheckInRoomsScreen: React.FC = () => {
                   <Card key={arrival.id} padding="lg" variant="elevated" style={styles.stayCard}>
                     <View style={styles.stayTop}>
                       <View style={styles.stayIdentity}>
-                        <Text style={styles.guestName}>{arrival.guestName}</Text>
+                        <View style={styles.guestTitleRow}>
+                          <Text style={styles.guestName}>{arrival.guestName}</Text>
+                          {arrival.guestPhone ? (
+                            <Text style={styles.guestPhoneText}>
+                              • {arrival.guestPhone}
+                            </Text>
+                          ) : null}
+                        </View>
                         <Text style={styles.stayMeta}>
                           {arrival.bookingReference} • {arrival.roomCategory}
                         </Text>
                         <Text style={styles.stayDates}>
-                          Stay: {arrival.nightsCount} Nights ({arrival.checkInDate} to {arrival.checkOutDate})
+                          Check-In: {arrival.checkInDate}{arrival.checkInTime ? ` (${arrival.checkInTime})` : ''} • Check-Out: {arrival.checkOutDate} ({arrival.nightsCount}N)
                         </Text>
                         <View style={styles.roomTagRow}>
                           <Icon name="bed" size={14} color={arrival.roomNumber ? '#1E40AF' : '#DC2626'} />
@@ -565,16 +602,31 @@ export const CheckInRoomsScreen: React.FC = () => {
                         </View>
                       </View>
 
-                      <Badge
-                        label={isCheckedIn ? 'IN HOUSE' : 'ARRIVAL DUE'}
-                        variant={isCheckedIn ? 'success' : 'warning'}
-                        size="sm"
-                      />
+                      <View style={styles.badgesCol}>
+                        <Badge
+                          label={isCheckedIn ? 'IN HOUSE' : 'ARRIVAL DUE'}
+                          variant={isCheckedIn ? 'success' : 'warning'}
+                          size="sm"
+                        />
+                        <View style={{ marginTop: 4 }}>
+                          <Badge
+                            label={(arrival.paymentStatus || (arrival.depositPaid >= arrival.totalAmount ? 'paid' : 'partial')).toUpperCase()}
+                            variant={
+                              arrival.paymentStatus === 'paid' || (!arrival.paymentStatus && arrival.depositPaid >= arrival.totalAmount)
+                                ? 'success'
+                                : arrival.depositPaid > 0
+                                ? 'warning'
+                                : 'error'
+                            }
+                            size="sm"
+                          />
+                        </View>
+                      </View>
                     </View>
 
                     <View style={styles.stayBottom}>
                       <View>
-                        <Text style={styles.folioAmount}>Rent: {formatCurrency(arrival.totalAmount)}</Text>
+                        <Text style={styles.folioAmount}>Total: {formatCurrency(arrival.totalAmount)}</Text>
                         <Text style={styles.advancePaidText}>
                           Advance: {formatCurrency(arrival.depositPaid)}
                         </Text>
@@ -1232,6 +1284,21 @@ const styles = StyleSheet.create({
   stayIdentity: {
     flex: 1,
     marginRight: spacing.sm,
+  },
+  guestTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  guestPhoneText: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+  badgesCol: {
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
   },
   guestName: {
     ...typography.subtitle1,

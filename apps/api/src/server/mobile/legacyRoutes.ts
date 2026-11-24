@@ -1,6 +1,6 @@
 // @ts-nocheck
 /*
- * Ported verbatim from mobile-nav (branch `manas`) server/routes/api.js @ 8627ca6.
+ * Ported verbatim from mobile-nav (branch `manas`) server/routes/api.js @ 1133d33.
  * Removed here and re-implemented securely in secureRoutes.ts:
  *   POST /auth/login, GET /auth/me, POST /managers, PATCH /managers/:id/password
  * Authentication, hotel isolation and error masking are applied by the
@@ -33,6 +33,52 @@ function checkHotelAccess(req, res, targetHotelId) {
   return true;
 }
 
+// --- Indian Standard Time (IST, UTC+5:30) Formatting Helpers ---
+function formatISTDate(d) {
+  if (!d) return '';
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return String(d).split('T')[0];
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(dt);
+  } catch {
+    return String(d).split('T')[0];
+  }
+}
+
+function formatISTTime(d) {
+  if (!d) return '';
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt.getTime())) return '';
+    return new Intl.DateTimeFormat('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }).format(dt);
+  } catch {
+    return '';
+  }
+}
+
+function getTodayISTString() {
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().split('T')[0];
+  }
+}
+
 // ==========================================
 // 1. HEALTH & SYSTEM STATUS
 // ==========================================
@@ -58,6 +104,7 @@ router.get('/health', async (req, res) => {
   }
 });
 
+// ==========================================
 // 3. HOTEL MANAGEMENT
 // ==========================================
 router.get('/hotels', async (req, res) => {
@@ -160,7 +207,6 @@ router.get('/managers', async (req, res) => {
   }
 });
 
-
 router.put('/managers/:id', async (req, res) => {
   try {
     const { fullName, email, phone, hotelId } = req.body;
@@ -183,7 +229,6 @@ router.patch('/managers/:id/status', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
 
 // ==========================================
 // 5. ROOM INVENTORY MANAGEMENT
@@ -317,9 +362,10 @@ router.get('/bookings', async (req, res) => {
       else if (dbStatus === 'CANCELLED') frontendStatus = 'cancelled';
       else if (dbStatus === 'PENDING') frontendStatus = 'pending';
 
-      const checkInFormatted = b.checkInDate ? new Date(b.checkInDate).toISOString().split('T')[0] : '';
-      const checkOutFormatted = b.checkOutDate ? new Date(b.checkOutDate).toISOString().split('T')[0] : '';
-      const createdFormatted = b.createdAt ? new Date(b.createdAt).toISOString().split('T')[0] : '';
+      const checkInFormatted = formatISTDate(b.checkInDate);
+      const checkOutFormatted = formatISTDate(b.checkOutDate);
+      const createdFormatted = formatISTDate(b.createdAt);
+      const checkInTimeFormatted = formatISTTime(b.checkInDate || b.createdAt);
 
       return {
         id: b.id,
@@ -332,6 +378,7 @@ router.get('/bookings', async (req, res) => {
         roomId: b.roomId || undefined,
         roomNumber: b.roomNumber || undefined,
         checkInDate: checkInFormatted,
+        checkInTime: checkInTimeFormatted,
         checkOutDate: checkOutFormatted,
         nightsCount: b.nightsCount || 1,
         numberOfGuests: b.totalGuests || 1,
@@ -377,10 +424,17 @@ router.post('/bookings', async (req, res) => {
       advanceAmount,
       paymentMethod,
       notes,
+      specialRequests,
       eventName,
       requiredRooms,
       allocatedRooms,
       remainingRooms,
+      guestKyc,
+      idType,
+      idNumber,
+      cityOfOrigin,
+      city,
+      address,
     } = req.body;
 
     const id = `b-${Date.now()}`;
@@ -389,15 +443,66 @@ router.post('/bookings', async (req, res) => {
     const roomsCount = parseInt(totalRooms, 10) || (parseInt(allocatedRooms, 10) || 1);
     const price = parseFloat(roomPrice) || 2500;
     const advance = parseFloat(advanceAmount) || 0;
-    const totalAmount = price * roomsCount;
+    const totalAmount = parseFloat(req.body.totalAmount) || (price * roomsCount);
+    const depositPaid = parseFloat(req.body.depositPaid) || advance;
+    const bookingStatus = (req.body.status ? req.body.status.toUpperCase() : 'CONFIRMED');
+    const paymentStatus = depositPaid >= totalAmount ? 'paid' : depositPaid > 0 ? 'partial' : 'unpaid';
+    const finalNotes = notes || specialRequests || '';
+
+    // Extract and resolve KYC identification fields
+    const kycType = (guestKyc && guestKyc.idType) || idType || null;
+    const kycNumber = (guestKyc && guestKyc.idNumber) || idNumber || null;
+    const kycCity = (guestKyc && (guestKyc.cityOfOrigin || guestKyc.city)) || cityOfOrigin || city || null;
+    const kycAddress = address || kycCity || null;
+
+    // Lookup or register guest in guests table
+    let guestId = req.body.guestId || null;
+    if (!guestId && guestPhone) {
+      const cleanPhone = String(guestPhone).replace(/\D/g, '').slice(-10);
+      if (cleanPhone.length >= 10) {
+        const [existingGuests] = await pool.query(
+          `SELECT id FROM guests WHERE RIGHT(REPLACE(phone, ' ', ''), 10) = ? ORDER BY (idNumber IS NOT NULL AND idNumber != '') DESC, updatedAt DESC LIMIT 1`,
+          [cleanPhone]
+        );
+        if (existingGuests.length > 0) {
+          guestId = existingGuests[0].id;
+        }
+      }
+    }
+
+    if (guestId) {
+      if (kycType || kycNumber || kycCity || kycAddress) {
+        await pool.query(
+          `UPDATE guests 
+           SET idType = COALESCE(?, idType),
+               idNumber = COALESCE(?, idNumber),
+               city = COALESCE(?, city),
+               address = COALESCE(?, address),
+               updatedAt = NOW()
+           WHERE id = ?`,
+          [kycType, kycNumber, kycCity, kycAddress, guestId]
+        );
+      }
+    } else {
+      guestId = `gst-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+      const nameParts = (guestName || 'Guest').trim().split(' ');
+      const fName = nameParts[0] || 'Guest';
+      const lName = nameParts.slice(1).join(' ') || '';
+      await pool.query(
+        `INSERT INTO guests (id, organizationId, firstName, lastName, phone, email, idType, idNumber, nationality, address, city, country, createdAt, updatedAt)
+         VALUES (?, 'org-resortos', ?, ?, ?, ?, ?, ?, 'Indian', ?, ?, 'India', NOW(), NOW())`,
+        [guestId, fName, lName, guestPhone || '', guestEmail || '', kycType, kycNumber, kycAddress, kycCity]
+      );
+    }
 
     await pool.query(
       `INSERT INTO bookings 
-       (id, hotelId, bookingReference, bookingType, guestName, guestPhone, guestEmail, roomId, roomNumber, roomCategory, roomType, checkInDate, checkOutDate, totalGuests, totalRooms, roomPrice, advanceAmount, depositPaid, totalAmount, paymentMethod, status, paymentStatus, notes, eventName, requiredRooms, allocatedRooms, remainingRooms, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CONFIRMED', ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+       (id, hotelId, guestId, bookingReference, bookingType, guestName, guestPhone, guestEmail, roomId, roomNumber, roomCategory, roomType, checkInDate, checkOutDate, totalGuests, totalRooms, roomPrice, advanceAmount, depositPaid, totalAmount, paymentMethod, status, paymentStatus, notes, eventName, requiredRooms, allocatedRooms, remainingRooms, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         id,
         hotelId,
+        guestId,
         code,
         bookingType || 'normal',
         guestName,
@@ -405,7 +510,7 @@ router.post('/bookings', async (req, res) => {
         guestEmail || '',
         roomId || null,
         roomNumber || null,
-        roomType || 'Deluxe Room',
+        req.body.roomCategory || roomType || 'Deluxe Room',
         roomType || 'Deluxe Room',
         checkInDate,
         checkOutDate,
@@ -413,17 +518,55 @@ router.post('/bookings', async (req, res) => {
         roomsCount,
         price,
         advance,
-        advance,
+        depositPaid,
         totalAmount,
         paymentMethod || 'UPI',
-        advance >= totalAmount ? 'paid' : advance > 0 ? 'partial' : 'unpaid',
-        notes || '',
+        bookingStatus,
+        paymentStatus,
+        finalNotes,
         eventName || null,
         requiredRooms || 0,
         allocatedRooms || roomsCount,
         remainingRooms || 0,
       ]
     );
+
+    if ((roomId || roomNumber) && (bookingStatus === 'CHECKED_IN' || req.body.status === 'checked_in')) {
+      await pool.query(
+        `UPDATE rooms 
+         SET status = 'OCCUPIED', housekeepingStatus = 'clean', currentGuestName = ?, currentBookingId = ?, updatedAt = NOW() 
+         WHERE (id = ? OR (roomNumber = ? AND hotelId = ?))`,
+        [guestName, id, roomId || null, roomNumber || null, hotelId]
+      );
+
+      const folioId = `fol-${Date.now()}`;
+      const invoiceNum = `INV-2026-${Math.floor(10000 + Math.random() * 90000)}`;
+      const tax = Math.round(totalAmount * 0.18);
+      const grandTotal = totalAmount + tax;
+      const balance = Math.max(0, grandTotal - depositPaid);
+
+      await pool.query(
+        `INSERT INTO invoices 
+         (id, hotelId, bookingId, invoiceNumber, subtotal, taxAmount, totalAmount, paidAmount, balanceDue, status, guestName, roomNumber, itemsJson, issuedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ISSUED', ?, ?, ?, NOW())`,
+        [
+          folioId,
+          hotelId,
+          id,
+          invoiceNum,
+          totalAmount,
+          tax,
+          grandTotal,
+          depositPaid,
+          balance,
+          guestName,
+          roomNumber || '104',
+          JSON.stringify([
+            { description: `${req.body.roomCategory || roomType || 'Room'} Stay`, amount: totalAmount, category: 'Room Charge' },
+          ]),
+        ]
+      );
+    }
 
     res.status(201).json({ success: true, id, bookingReference: code });
   } catch (error) {
@@ -448,6 +591,14 @@ router.post('/bookings/walk-in', async (req, res) => {
       totalAmount,
       depositPaid,
       paymentMethod,
+      guestKyc,
+      idType,
+      idNumber,
+      cityOfOrigin,
+      city,
+      address,
+      notes,
+      specialRequests,
     } = req.body;
 
     const id = `b-${Date.now()}`;
@@ -479,12 +630,12 @@ router.post('/bookings/walk-in', async (req, res) => {
       ]
     );
 
-    if (roomId) {
+    if (roomId || roomNumber) {
       await pool.query(
         `UPDATE rooms 
          SET status = 'OCCUPIED', housekeepingStatus = 'clean', currentGuestName = ?, currentBookingId = ?, updatedAt = NOW() 
-         WHERE id = ?`,
-        [guestName, id, roomId]
+         WHERE (id = ? OR (roomNumber = ? AND hotelId = ?))`,
+        [guestName, id, roomId || null, roomNumber || null, hotelId]
       );
     }
 
@@ -545,25 +696,47 @@ router.patch('/bookings/:id/checkin', async (req, res) => {
           [guestKyc.idType || null, guestKyc.idNumber || null, guestKyc.cityOfOrigin || null, b.guestId]
         );
       } else {
-        const newGuestId = `gst-${Date.now()}`;
-        const nameParts = (b.guestName || '').trim().split(' ');
-        const firstName = nameParts[0] || 'Guest';
-        const lastName = nameParts.slice(1).join(' ') || '';
-        await pool.query(
-          `INSERT INTO guests (id, organizationId, firstName, lastName, email, phone, idType, idNumber, nationality, city, country, createdAt, updatedAt)
-           VALUES (?, 'org-resortos', ?, ?, ?, ?, ?, ?, 'Indian', ?, 'India', NOW(), NOW())`,
-          [
-            newGuestId,
-            firstName,
-            lastName,
-            b.guestEmail || '',
-            b.guestPhone || '',
-            guestKyc.idType || null,
-            guestKyc.idNumber || null,
-            guestKyc.cityOfOrigin || null,
-          ]
-        );
-        b.guestId = newGuestId;
+        let foundGuestId = null;
+        if (b.guestPhone) {
+          const cleanPhone = String(b.guestPhone).replace(/\D/g, '').slice(-10);
+          if (cleanPhone.length >= 10) {
+            const [gRows] = await pool.query(
+              `SELECT id FROM guests WHERE RIGHT(REPLACE(phone, ' ', ''), 10) = ? ORDER BY (idNumber IS NOT NULL AND idNumber != '') DESC, updatedAt DESC LIMIT 1`,
+              [cleanPhone]
+            );
+            if (gRows.length > 0) foundGuestId = gRows[0].id;
+          }
+        }
+
+        if (foundGuestId) {
+          await pool.query(
+            `UPDATE guests 
+             SET idType = COALESCE(?, idType), idNumber = COALESCE(?, idNumber), city = COALESCE(?, city), updatedAt = NOW()
+             WHERE id = ?`,
+            [guestKyc.idType || null, guestKyc.idNumber || null, guestKyc.cityOfOrigin || null, foundGuestId]
+          );
+          b.guestId = foundGuestId;
+        } else {
+          const newGuestId = `gst-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
+          const nameParts = (b.guestName || '').trim().split(' ');
+          const firstName = nameParts[0] || 'Guest';
+          const lastName = nameParts.slice(1).join(' ') || '';
+          await pool.query(
+            `INSERT INTO guests (id, organizationId, firstName, lastName, email, phone, idType, idNumber, nationality, city, country, createdAt, updatedAt)
+             VALUES (?, 'org-resortos', ?, ?, ?, ?, ?, ?, 'Indian', ?, 'India', NOW(), NOW())`,
+            [
+              newGuestId,
+              firstName,
+              lastName,
+              b.guestEmail || '',
+              b.guestPhone || '',
+              guestKyc.idType || null,
+              guestKyc.idNumber || null,
+              guestKyc.cityOfOrigin || null,
+            ]
+          );
+          b.guestId = newGuestId;
+        }
       }
     }
 
@@ -1761,49 +1934,145 @@ router.get('/reports/guests/export', async (req, res) => {
 
     const [rows] = await pool.query(query, [hotelId, hotelId]);
 
+    // Fetch all guests in organization to resolve phone-based linkages for historical records
+    const [allGuests] = await pool.query(
+      `SELECT id, phone, idType, idNumber, city, address, specialRequests FROM guests WHERE phone IS NOT NULL AND phone != ''`
+    );
+    const guestByPhone = new Map();
+    for (const g of allGuests) {
+      if (g.phone) {
+        const clean = String(g.phone).replace(/\D/g, '').slice(-10);
+        if (clean.length >= 10) {
+          const existing = guestByPhone.get(clean);
+          if (!existing || (!existing.idNumber && g.idNumber)) {
+            guestByPhone.set(clean, g);
+          }
+        }
+      }
+    }
+
     const hotelName = hotelId === 'h-villa' ? 'THE VILLA' : 'NAVKAR PALACE & RESORT';
     const hotelCode = hotelId === 'h-villa' ? 'The_Villa' : 'Navkar_Palace';
     const today = new Date().toISOString().split('T')[0];
+
+    // Helper to resolve KYC info with fallback extraction from phone mapping and notes/specialRequests
+    const resolveKycInfo = (row) => {
+      let idType = (row.idType || '').trim();
+      let idNumber = (row.idNumber || '').trim();
+      let city = (row.cityOfOrigin || '').trim();
+
+      // If missing from direct b.guestId = g.id join, check guestByPhone fallback
+      if ((!idType || !idNumber) && row.guestPhone) {
+        const cleanPhone = String(row.guestPhone).replace(/\D/g, '').slice(-10);
+        if (cleanPhone.length >= 10 && guestByPhone.has(cleanPhone)) {
+          const matched = guestByPhone.get(cleanPhone);
+          if (!idType && matched.idType) idType = matched.idType.trim();
+          if (!idNumber && matched.idNumber) idNumber = matched.idNumber.trim();
+          if (!city && (matched.city || matched.address)) city = (matched.city || matched.address).trim();
+        }
+      }
+
+      // If either idType or idNumber is still missing, try parsing from notes / specialRequests
+      if (!idType || !idNumber) {
+        const text = row.notes || '';
+        // Pattern 1: "Walk-in Guest. ID: Aadhaar Card (4821 9920 1120)." or "ID: Passport (Z1234567)"
+        const m1 = text.match(/ID:\s*([A-Za-z\s]+?)\s*\(([^)]+)\)/i);
+        if (m1) {
+          if (!idType) idType = m1[1].trim();
+          if (!idNumber) idNumber = m1[2].trim();
+        } else {
+          // Pattern 2: "Govt ID: Aadhaar Card - 1234 5678 9012"
+          const m2 = text.match(/(?:Govt\s*ID|ID\s*Proof):\s*([A-Za-z\s]+?)\s*[-:]\s*([A-Za-z0-9\s-]+)/i);
+          if (m2) {
+            if (!idType) idType = m2[1].trim();
+            if (!idNumber) idNumber = m2[2].trim();
+          } else {
+            // Pattern 3: "Aadhaar Card: 1234..." or "Passport: ..."
+            const m3 = text.match(/(Aadhaar(?: Card)?|Passport|Driving License|Voter ID)[\s:-]+([A-Za-z0-9\s-]+)/i);
+            if (m3) {
+              if (!idType) idType = m3[1].trim();
+              if (!idNumber) idNumber = m3[2].trim();
+            }
+          }
+        }
+      }
+
+      // Check notes for city/origin if not set
+      if (!city) {
+        const text = row.notes || '';
+        const cityMatch = text.match(/(?:City|Origin|From|Address):\s*([A-Za-z\s,]+?)(?:\.|$|\n)/i);
+        if (cityMatch) {
+          city = cityMatch[1].trim();
+        }
+      }
+
+      return {
+        idType: idType || 'N/A',
+        idNumber: idNumber || 'N/A',
+        city: city || 'N/A',
+      };
+    };
+
+    const resolvedRecords = rows.map((r) => {
+      const kyc = resolveKycInfo(r);
+      const total = Number(r.totalAmount) || 0;
+      const deposit = Number(r.depositPaid) || 0;
+      return {
+        ...r,
+        idType: kyc.idType,
+        idNumber: kyc.idNumber,
+        cityOfOrigin: kyc.city,
+        balanceDue: Math.max(0, total - deposit),
+      };
+    });
 
     if (format === 'json') {
       return res.json({
         success: true,
         hotelId,
         hotelName,
-        totalRecords: rows.length,
+        totalRecords: resolvedRecords.length,
         exportedAt: new Date().toISOString(),
-        records: rows,
+        records: resolvedRecords,
       });
     }
 
     // Build Excel Workbook via xlsx
     
 
-    const excelData = rows.map((r, index) => ({
-      'S.No': index + 1,
-      'Booking Reference': r.bookingReference,
-      'Guest Name': r.guestName,
-      'Phone Number': r.guestPhone || 'N/A',
-      'Email Address': r.guestEmail || 'N/A',
-      'Property': r.hotelName,
-      'Room Number': r.roomNumber || 'Unassigned',
-      'Room Category': r.roomCategory || 'N/A',
-      'Check-In Date': r.checkInDate,
-      'Check-Out Date': r.checkOutDate,
-      'Nights': Number(r.nightsCount),
-      'Guests': Number(r.numberOfGuests),
-      'Status': r.bookingStatus,
-      'Total Amount (₹)': Number(r.totalAmount),
-      'Deposit Paid (₹)': Number(r.depositPaid),
-      'Payment Status': r.paymentStatus,
-      'Payment Method': r.paymentMethod,
-      'Booking Type': r.bookingType,
-      'Govt ID Type': r.idType || 'N/A',
-      'Govt ID Number': r.idNumber || 'N/A',
-      'City of Origin': r.cityOfOrigin || 'N/A',
-      'Special Notes': r.notes || 'None',
-      'Created At': r.createdAt,
-    }));
+    const excelData = rows.map((r, index) => {
+      const kyc = resolveKycInfo(r);
+      const total = Number(r.totalAmount) || 0;
+      const deposit = Number(r.depositPaid) || 0;
+      const balance = Math.max(0, total - deposit);
+
+      return {
+        'S.No': index + 1,
+        'Booking Reference': r.bookingReference,
+        'Guest Name': r.guestName,
+        'Phone Number': r.guestPhone || 'N/A',
+        'Email Address': r.guestEmail || 'N/A',
+        'Property': r.hotelName,
+        'Room Number': r.roomNumber || 'Unassigned',
+        'Room Category': r.roomCategory || 'N/A',
+        'Check-In Date': r.checkInDate,
+        'Check-Out Date': r.checkOutDate,
+        'Nights': Number(r.nightsCount),
+        'Guests': Number(r.numberOfGuests),
+        'Status': r.bookingStatus,
+        'Total Amount (₹)': total,
+        'Deposit Paid (₹)': deposit,
+        'Balance Due (₹)': balance,
+        'Payment Status': r.paymentStatus,
+        'Payment Method': r.paymentMethod,
+        'Booking Type': r.bookingType,
+        'Govt ID Type': kyc.idType,
+        'Govt ID Number': kyc.idNumber,
+        'City of Origin': kyc.city,
+        'Special Notes': r.notes || 'None',
+        'Created At': r.createdAt,
+      };
+    });
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(excelData);

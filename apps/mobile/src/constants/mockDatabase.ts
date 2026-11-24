@@ -356,7 +356,7 @@ export const INITIAL_FOLIOS: BillingFolio[] = [
     invoiceNumber: 'INV-2026-20311',
     bookingId: 'b-201',
     guestName: 'Siddharth Malhotra',
-    roomNumber: '101',
+    roomNumber: '1',
     status: 'open',
     items: [
       { id: 'ch-201', description: 'Deluxe AC Room (2 Nights)', category: 'room', amount: 9000, date: '2026-11-15' },
@@ -376,7 +376,7 @@ export const INITIAL_FOLIOS: BillingFolio[] = [
     invoiceNumber: 'INV-2026-20312',
     bookingId: 'b-202',
     guestName: 'Ananya Deshmukh',
-    roomNumber: '102',
+    roomNumber: '2',
     status: 'settled',
     items: [
       { id: 'ch-204', description: 'Executive Suite (2 Nights)', category: 'room', amount: 14000, date: '2026-11-14' },

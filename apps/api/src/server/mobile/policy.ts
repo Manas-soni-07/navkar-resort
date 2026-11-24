@@ -104,6 +104,14 @@ export async function enforcePolicy(ctx: MobileContext, req: MobileRequest): Pro
     throw new PolicyError(400, 'A staff member (staffId) is required.');
   }
 
+  // Guests are organization-level records; a client-supplied guestId must belong to the caller's organization.
+  if (body?.guestId) {
+    const [g] = (await pool.query('SELECT organizationId FROM guests WHERE id = ? LIMIT 1', [String(body.guestId)])) as any;
+    if (!g.length || g[0].organizationId !== user.organizationId) {
+      throw new PolicyError(403, 'Access Denied: guest record not found in your organization.');
+    }
+  }
+
   // Rows referenced from the body.
   if (body) {
     for (const [field, table] of BODY_REFS) {
