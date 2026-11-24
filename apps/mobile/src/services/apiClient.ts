@@ -28,6 +28,17 @@ import {
 } from '../types/hotel';
 import { apiConfig, NetworkConfig } from '../config/apiConfig';
 
+export interface StoredDocument {
+  id: string;
+  docType: string;
+  contentType: string;
+  sizeBytes: number | null;
+  originalName: string | null;
+  createdAt: string;
+  /** Private, short-lived (5 min) link to view/download the file. */
+  viewUrl: string;
+}
+
 export class ApiClient {
   private baseUrl: string = apiConfig.getBaseUrl();
   private authToken: string | null = null;
@@ -274,6 +285,30 @@ export class ApiClient {
   /** Validates the current token and returns the signed-in user as the server sees it. */
   public async me(): Promise<{ user: CurrentUser }> {
     return this.request('/auth/me');
+  }
+
+  // --- Documents (guest ID proofs, receipts) stored privately in Cloudflare R2 ---
+  public async requestDocumentUpload(data: {
+    entityType: 'booking' | 'expense';
+    entityId: string;
+    docType: string;
+    contentType: string;
+    sizeBytes?: number;
+    fileName?: string;
+  }): Promise<{ documentId: string; uploadUrl: string; contentType: string }> {
+    return this.request('/documents/upload-url', { method: 'POST', body: JSON.stringify(data) });
+  }
+
+  public async completeDocumentUpload(documentId: string): Promise<{ success: boolean; sizeBytes: number }> {
+    return this.request(`/documents/${encodeURIComponent(documentId)}/complete`, { method: 'POST', body: '{}' });
+  }
+
+  public async listDocuments(entityType: 'booking' | 'expense', entityId: string): Promise<StoredDocument[]> {
+    return this.request(`/documents?entityType=${entityType}&entityId=${encodeURIComponent(entityId)}`);
+  }
+
+  public async deleteDocument(documentId: string): Promise<{ success: boolean }> {
+    return this.request(`/documents/${encodeURIComponent(documentId)}`, { method: 'DELETE', body: '{}' });
   }
 
   // --- Hotels ---

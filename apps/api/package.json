@@ -16,6 +16,8 @@
     "user:set-password": "node --env-file=.env.local scripts/set-password.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1175.0",
+    "@aws-sdk/s3-request-presigner": "^3.1175.0",
     "@prisma/client": "^6.4.1",
     "@resortos/shared": "workspace:*",
     "bcryptjs": "^3.0.3",

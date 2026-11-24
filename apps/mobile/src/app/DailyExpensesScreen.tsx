@@ -21,6 +21,7 @@ import { Icon } from '../components/common/Icon';
 import { Button } from '../components/common/Button';
 import { formatCurrency, formatDate } from '../utils/formatters';
 import { ExpenseCategory, ExpenseRecord } from '../types/hotel';
+import { DocumentsModal } from '../components/documents/DocumentsModal';
 
 export const DailyExpensesScreen: React.FC = () => {
   const { goBack } = useNavigation();
@@ -47,6 +48,8 @@ export const DailyExpensesScreen: React.FC = () => {
 
   // Add Expense Modal State
   const [showAddModal, setShowAddModal] = useState(false);
+  // Expense whose receipts are being viewed/uploaded
+  const [receiptExpense, setReceiptExpense] = useState<ExpenseRecord | null>(null);
   const [targetHotelId, setTargetHotelId] = useState<string>(
     isAdmin ? 'h-villa' : managerAssignedHotelId
   );
@@ -376,6 +379,12 @@ export const DailyExpensesScreen: React.FC = () => {
                 </Text>
               )}
             </View>
+
+            {/* Receipt photos / PDFs (private storage) */}
+            <TouchableOpacity style={styles.receiptBtn} onPress={() => setReceiptExpense(exp)}>
+              <Icon name="receipt" size={14} color={colors.primaryNavy} />
+              <Text style={styles.receiptBtnText}>Receipt</Text>
+            </TouchableOpacity>
           </View>
         ))}
 
@@ -389,6 +398,15 @@ export const DailyExpensesScreen: React.FC = () => {
           </View>
         )}
       </ScrollView>
+
+      <DocumentsModal
+        visible={!!receiptExpense}
+        onClose={() => setReceiptExpense(null)}
+        entityType="expense"
+        entityId={receiptExpense?.id ?? ''}
+        title={`Receipt • ${receiptExpense?.title ?? ''}`}
+        subtitle={receiptExpense ? `₹ ${receiptExpense.amount.toLocaleString('en-IN')} • ${receiptExpense.vendor}` : undefined}
+      />
 
       {/* Add Expense Modal */}
       <Modal visible={showAddModal} animationType="slide" transparent={false}>
@@ -528,6 +546,21 @@ export const DailyExpensesScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  receiptBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.primaryTint,
+  },
+  receiptBtnText: {
+    ...typography.captionMedium,
+    color: colors.primaryNavy,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,

@@ -941,3 +941,33 @@ model SpaTreatment {
 
   @@map("spa_treatments")
 }
+
+// ========================================================
+// 20. DOCUMENT (files in Cloudflare R2: guest ID proofs, expense receipts)
+// The file itself lives in the private R2 bucket under `objectKey`;
+// this row records ownership, type and who uploaded it.
+// ========================================================
+
+model Document {
+  id             String    @id @default(cuid())
+  organizationId String
+  hotelId        String
+  /// "booking" (guest ID proof at check-in) | "expense" (receipt)
+  entityType     String    @db.VarChar(30)
+  entityId       String
+  /// "id_front" | "id_back" | "id_document" | "receipt" | "other"
+  docType        String    @db.VarChar(30)
+  objectKey      String    @db.VarChar(512)
+  contentType    String    @db.VarChar(100)
+  sizeBytes      Int?
+  originalName   String?
+  /// "pending" until the upload is confirmed, then "uploaded"
+  status         String    @default("pending") @db.VarChar(20)
+  uploadedById   String
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  @@index([hotelId], map: "idx_docs_hotel")
+  @@index([entityType, entityId], map: "idx_docs_entity")
+  @@map("documents")
+}

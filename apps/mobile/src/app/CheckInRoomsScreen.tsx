@@ -33,6 +33,7 @@ import { Button } from '../components/common/Button';
 import { formatCurrency } from '../utils/formatters';
 import { Room, Booking, IdProofType } from '../types/hotel';
 import { apiClient } from '../services/apiClient';
+import { DocumentsModal } from '../components/documents/DocumentsModal';
 
 interface ExtraChargeItem {
   id: string;
@@ -94,6 +95,8 @@ export const CheckInRoomsScreen: React.FC = () => {
 
   // --- Walk-in Check-in Modal State (12 fields required) ---
   const [showWalkInModal, setShowWalkInModal] = useState(false);
+  // Booking whose ID documents are being viewed/uploaded
+  const [docsBooking, setDocsBooking] = useState<Booking | null>(null);
   const [walkInGuestName, setWalkInGuestName] = useState('');
   const [walkInPhone, setWalkInPhone] = useState('+91 ');
   const [walkInGuestsCount, setWalkInGuestsCount] = useState('2');
@@ -660,6 +663,12 @@ export const CheckInRoomsScreen: React.FC = () => {
                         )}
                       </View>
                     </View>
+
+                    {/* Guest ID proofs (private storage) */}
+                    <TouchableOpacity style={styles.idDocsBtn} onPress={() => setDocsBooking(arrival)}>
+                      <Icon name="file-text" size={14} color={colors.primaryNavy} />
+                      <Text style={styles.idDocsBtnText}>ID Documents</Text>
+                    </TouchableOpacity>
                   </Card>
                 );
               })
@@ -770,6 +779,15 @@ export const CheckInRoomsScreen: React.FC = () => {
       {/* ============================================================== */}
       {/* WALK-IN CHECK-IN MODAL (ALL 12 MANDATED FIELDS)                */}
       {/* ============================================================== */}
+      <DocumentsModal
+        visible={!!docsBooking}
+        onClose={() => setDocsBooking(null)}
+        entityType="booking"
+        entityId={docsBooking?.id ?? ''}
+        title={`ID Documents • ${docsBooking?.guestName ?? ''}`}
+        subtitle={docsBooking ? `${docsBooking.bookingReference} • Room ${docsBooking.roomNumber ?? '-'}` : undefined}
+      />
+
       <Modal visible={showWalkInModal} animationType="slide" transparent>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -1187,6 +1205,21 @@ export const CheckInRoomsScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  idDocsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.primaryTint,
+  },
+  idDocsBtnText: {
+    ...typography.captionMedium,
+    color: colors.primaryNavy,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: '#F8FAFC',

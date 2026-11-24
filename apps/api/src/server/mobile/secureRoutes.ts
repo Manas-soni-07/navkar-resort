@@ -7,6 +7,7 @@ import { prisma } from '@/lib/prisma';
 import { generateToken, isAdminRole } from '@/lib/auth';
 import { MobileRouter } from './router';
 import { signGuestExportToken } from './downloadLink';
+import { registerDocumentRoutes } from './documentRoutes';
 import type { MobileContext } from './context';
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -18,6 +19,7 @@ export const publicRoutes = new MobileRouter();
 export function buildSecureRoutes(ctx: MobileContext): MobileRouter {
   const router = new MobileRouter();
   const { user } = ctx;
+  registerDocumentRoutes(router, ctx);
 
   router.get('/auth/me', async (_req, res) => {
     const u = await prisma.user.findUnique({
