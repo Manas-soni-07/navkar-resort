@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "ResortOS",
+    "name": "Guest Book",
     "slug": "resortos",
-    "version": "1.4.0",
+    "version": "1.5.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "resortos",
@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F8F9FA"
+      "backgroundColor": "#FFFFFF"
     },
     "ios": {
       "supportsTablet": true,
@@ -19,13 +19,13 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#0F2942",
+        "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "package": "com.resortos.app",
-      "versionCode": 6
+      "versionCode": 7
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -49,6 +49,6 @@
         }
       ]
     ],
-    "description": "Hotel & resort management for The Villa and Navkar Palace"
+    "description": "Guest Book - hotel check-in software for The Villa and Navkar Palace"
   }
 }

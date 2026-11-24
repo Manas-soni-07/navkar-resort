@@ -29,7 +29,7 @@ export const SettingsScreen: React.FC = () => {
   const { currentUser, logout, hotels } = useHotel();
 
   const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to log out of ResortOS?', [
+    Alert.alert('Sign Out', 'Are you sure you want to log out of Guest Book?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Sign Out',
@@ -126,7 +126,7 @@ export const SettingsScreen: React.FC = () => {
 
         {/* Sign Out Button */}
         <Button
-          title="Sign Out of ResortOS"
+          title="Sign Out of Guest Book"
           variant="outline"
           size="lg"
           onPress={handleSignOut}
@@ -134,7 +134,7 @@ export const SettingsScreen: React.FC = () => {
         />
 
         <Text style={styles.versionNote}>
-          ResortOS Enterprise Edition v2.0{'\n'}
+          Guest Book v1.5{'\n'}
           Built with React Native & TiDB Cloud
         </Text>
       </ScrollView>

@@ -23,6 +23,10 @@ const ADMIN_ONLY: Array<[string, RegExp]> = [
   ['*', /^\/managers(\/.*)?$/],
   ['GET', /^\/sync\/summary$/],
   ['GET', /^\/dashboard\/daily-summary$/],
+  // Money paid to staff and the guest register are the owner's (client decision 24 Nov 2026):
+  ['*', /^\/salary-advances(\/.*)?$/],
+  ['*', /^\/salaries(\/.*)?$/],
+  ['*', /^\/reports\/guests\/.*$/],
 ];
 
 /** `/<prefix>/:id/...` -> table whose row `id` must belong to an allowed hotel. */

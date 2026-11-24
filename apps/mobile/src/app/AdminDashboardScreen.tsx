@@ -30,6 +30,7 @@ import { KPICard } from '../components/dashboard/KPICard';
 import { DashboardCalendar } from '../components/dashboard/DashboardCalendar';
 import { formatCurrency } from '../utils/formatters';
 import { apiClient } from '../services/apiClient';
+import { ExportGuestsModal } from '../components/documents/ExportGuestsModal';
 
 export const AdminDashboardScreen: React.FC = () => {
   const { navigate } = useNavigation();
@@ -162,51 +163,10 @@ export const AdminDashboardScreen: React.FC = () => {
       .slice(0, 5);
   }, [targetBookings]);
 
-  // Complete Historical Guest Export Handler
-  const [exporting, setExporting] = useState<boolean>(false);
-
-  const handleExportGuests = async (targetId?: string) => {
-    const hotelIdToExport = targetId || (filterHotelId === 'all' ? selectedHotelId : filterHotelId);
-
-    if (hotelIdToExport === 'all') {
-      Alert.alert(
-        'Select Property for Export',
-        'Please select a specific hotel to download its complete guest history:',
-        [
-          { text: 'The Villa (Jaipur)', onPress: () => handleExportGuests('h-villa') },
-          { text: 'Navkar Palace (Udaipur)', onPress: () => handleExportGuests('h-navkar') },
-          { text: 'Cancel', style: 'cancel' },
-        ]
-      );
-      return;
-    }
-
-    setExporting(true);
-    try {
-      const summary = await apiClient.getGuestExportSummary(hotelIdToExport);
-      const exportUrl = await apiClient.getGuestExportUrl(hotelIdToExport);
-
-      Alert.alert(
-        'Download Historical Guest Excel',
-        `Property: ${summary.hotelName}\nTotal Historical Records: ${summary.totalRecords} guests\n\nAll existing records from the beginning of the hotel database are included. Proceed to download Excel workbook?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Download Excel (.xlsx)',
-            onPress: () => {
-              Linking.openURL(exportUrl).catch((err) => {
-                Alert.alert('Download Error', `Could not open browser for download: ${err.message}`);
-              });
-            },
-          },
-        ]
-      );
-    } catch (err: any) {
-      Alert.alert('Export Failed', err.message || 'Unable to retrieve guest export from server.');
-    } finally {
-      setExporting(false);
-    }
-  };
+  // Guest register export (admin-only): opens the hotel / period / fields chooser.
+  const [exporting] = useState<boolean>(false);
+  const [showExport, setShowExport] = useState<boolean>(false);
+  const handleExportGuests = () => setShowExport(true);
 
   // 11 Core Hotel Management Modules
   const adminModules: { id: string; title: string; subtitle: string; icon: IconName; screen: any; color: string }[] = [
@@ -384,6 +344,13 @@ export const AdminDashboardScreen: React.FC = () => {
             size="sm"
           />
         </View>
+
+        <ExportGuestsModal
+          visible={showExport}
+          onClose={() => setShowExport(false)}
+          hotels={hotels}
+          initialHotelId={filterHotelId === 'all' ? selectedHotelId : filterHotelId}
+        />
 
         {/* Complete Historical Guest Export Action Bar */}
         <View style={styles.exportBar}>

@@ -23,7 +23,16 @@ import { CloudSyncScreen } from './CloudSyncScreen';
 import { colors } from '../theme/colors';
 
 const PUBLIC_SCREENS = new Set(['splash', 'role-selection', 'login']);
-const ADMIN_ONLY_SCREENS = new Set(['admin-dashboard', 'hotels', 'managers', 'cloud-sync']);
+// Salary (advances + payroll) and the daily summary are admin-only (client decision 24 Nov 2026).
+const ADMIN_ONLY_SCREENS = new Set([
+  'admin-dashboard',
+  'hotels',
+  'managers',
+  'cloud-sync',
+  'salary-advances',
+  'salaries',
+  'daily-summary',
+]);
 
 export const MainAppNavigator: React.FC = () => {
   const { currentScreen } = useNavigation();

@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   SafeAreaView,
+  Image,
 } from 'react-native';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
@@ -39,14 +40,12 @@ export const SplashScreen: React.FC = () => {
       <View style={styles.container}>
         {/* Brand Emblem */}
         <View style={styles.brandWrapper}>
-          <View style={styles.emblemContainer}>
-            <View style={styles.emblemOuterCircle}>
-              <Icon name="hotel" size={38} color={colors.primaryNavy} />
-            </View>
-          </View>
-
-          <Text style={styles.brandTitle}>ResortOS</Text>
-          <Text style={styles.brandSubtitle}>HOTEL & RESORT MANAGEMENT</Text>
+          <Image
+            source={require('../../assets/guestbook-logo.png')}
+            style={styles.logoImage}
+            resizeMode="contain"
+            accessibilityLabel="Guest Book - Hotel Check-in Software"
+          />
 
           <View style={styles.versionBadge}>
             <Text style={styles.versionText}>THE VILLA & NAVKAR PALACE</Text>
@@ -57,7 +56,7 @@ export const SplashScreen: React.FC = () => {
         <View style={styles.footerWrapper}>
           <View style={styles.statusBox}>
             <ActivityIndicator size="small" color={colors.primaryNavy} style={styles.spinner} />
-            <Text style={styles.statusText}>Connecting to ResortOS Cloud...</Text>
+            <Text style={styles.statusText}>Connecting to Guest Book Cloud...</Text>
           </View>
 
           {/* Quick Skip Button */}
@@ -75,6 +74,12 @@ export const SplashScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  logoImage: {
+    width: 260,
+    height: 204,
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: colors.background,

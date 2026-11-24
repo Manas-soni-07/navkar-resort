@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -20,17 +20,12 @@ import { Badge } from '../components/common/Badge';
 import { Icon } from '../components/common/Icon';
 import { Button } from '../components/common/Button';
 import { formatCurrency, formatPercentage } from '../utils/formatters';
+import { apiClient } from '../services/apiClient';
+import type { Room, Booking, BillingFolio, ExpenseRecord } from '../types/hotel';
 
 export const DailySummaryScreen: React.FC = () => {
   const { goBack } = useNavigation();
-  const {
-    currentUser,
-    hotels,
-    rooms: allRooms,
-    bookings: allBookings,
-    folios: allFolios,
-    expenses: allExpenses,
-  } = useHotel();
+  const { currentUser, hotels } = useHotel();
 
   // Role Security Check
   const isAdmin = currentUser?.role === 'ADMIN';
@@ -42,114 +37,163 @@ export const DailySummaryScreen: React.FC = () => {
   // Preview Modal
   const [showPreviewModal, setShowPreviewModal] = useState(false);
 
-  // Compute metrics based on selected hotel
-  const metrics = useMemo(() => {
-    // 1. Filter entities by hotel
-    const filteredHotels =
-      selectedHotelId === 'all'
-        ? hotels
-        : hotels.filter((h) => h.id === selectedHotelId);
+  // This screen loads data for ALL of the admin's hotels itself (the app otherwise only
+  // holds the currently selected hotel), so "All Hotels" really is consolidated.
+  const [allRooms, setAllRooms] = useState<Room[]>([]);
+  const [allBookings, setAllBookings] = useState<Booking[]>([]);
+  const [allFolios, setAllFolios] = useState<BillingFolio[]>([]);
+  const [allExpenses, setAllExpenses] = useState<ExpenseRecord[]>([]);
 
+  const loadAll = useCallback(async () => {
+    if (!isAdmin) return;
+    try {
+      const [r, b, f, e] = await Promise.all([
+        apiClient.getRooms('all'),
+        apiClient.getBookings('all'),
+        apiClient.getFolios('all'),
+        apiClient.getExpenses('all'),
+      ]);
+      setAllRooms(r);
+      setAllBookings(b);
+      setAllFolios(f);
+      setAllExpenses(e);
+    } catch (err: any) {
+      Alert.alert('Daily Summary', err?.message || 'Could not load report data.');
+    }
+  }, [isAdmin]);
+
+  useEffect(() => {
+    loadAll();
+  }, [loadAll]);
+
+  // Period in Indian time: [from, to] as YYYY-MM-DD (inclusive) plus display labels.
+  const period = useMemo(() => {
+    const fmt = (d: Date) =>
+      new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+    const nice = (d: Date, withYear = false) =>
+      new Intl.DateTimeFormat('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: 'numeric',
+        month: 'short',
+        ...(withYear ? { year: 'numeric' as const } : {}),
+      }).format(d);
+    const now = new Date();
+    const day = 24 * 60 * 60 * 1000;
+    const today = fmt(now);
+    if (dateFilter === 'yesterday') {
+      const y = new Date(now.getTime() - day);
+      return { from: fmt(y), to: fmt(y), label: `Yesterday (${nice(y)})`, reportDate: nice(y, true) };
+    }
+    if (dateFilter === 'last7') {
+      const s = new Date(now.getTime() - 6 * day);
+      return { from: fmt(s), to: today, label: 'Last 7 Days', reportDate: `${nice(s)} - ${nice(now, true)}` };
+    }
+    if (dateFilter === 'month') {
+      const monthName = new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', month: 'long', year: 'numeric' }).format(now);
+      return { from: `${today.slice(0, 8)}01`, to: today, label: 'Month to Date', reportDate: `${monthName} (to date)` };
+    }
+    return { from: today, to: today, label: `Today (${nice(now)})`, reportDate: nice(now, true) };
+  }, [dateFilter]);
+
+  // Compute metrics for the selected hotel(s) and period
+  const metrics = useMemo(() => {
+    const inPeriod = (d?: string) => !!d && d.slice(0, 10) >= period.from && d.slice(0, 10) <= period.to;
+
+    const filteredHotels = selectedHotelId === 'all' ? hotels : hotels.filter((h) => h.id === selectedHotelId);
     const targetHotelIds = filteredHotels.map((h) => h.id);
 
-    const targetRooms = allRooms.filter((r) => targetHotelIds.includes(r.hotelId));
-    const targetBookings = allBookings.filter((b) => targetHotelIds.includes(b.hotelId));
-    const targetFolios = allFolios.filter((f) => targetHotelIds.includes(f.hotelId));
-    const targetExpenses = allExpenses.filter((e) => targetHotelIds.includes(e.hotelId));
+    const compute = (ids: string[]) => {
+      const rooms = allRooms.filter((r) => ids.includes(r.hotelId));
+      const bookings = allBookings.filter((b) => ids.includes(b.hotelId) && b.status !== 'cancelled');
+      const folios = allFolios.filter((f) => ids.includes(f.hotelId));
+      const expenses = allExpenses.filter((e) => ids.includes(e.hotelId));
 
-    // Room stats
-    const totalRooms = targetRooms.length;
-    const occupiedRooms = targetRooms.filter((r) => r.status === 'occupied').length;
-    const availableRooms = targetRooms.filter((r) => r.status === 'available').length;
-    const cleaningRooms = targetRooms.filter((r) => r.status === 'cleaning').length;
-    const occupancyRate = totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0;
+      // Rooms: current state
+      const totalRooms = rooms.length;
+      const occupiedRooms = rooms.filter((r) => r.status === 'occupied').length;
+      const availableRooms = rooms.filter((r) => r.status === 'available').length;
+      const cleaningRooms = rooms.filter((r) => r.status === 'cleaning').length;
 
-    // Movement
-    const todayCheckIns = targetBookings.filter(
-      (b) => b.status === 'checked_in' || b.status === 'confirmed'
-    ).length;
-    const todayCheckOuts = targetBookings.filter((b) => b.status === 'checked_out').length;
+      // Movement within the period
+      const checkIns = bookings.filter(
+        (b) => (b.status === 'checked_in' || b.status === 'checked_out') && inPeriod(b.checkInDate)
+      ).length;
+      const checkOuts = bookings.filter((b) => b.status === 'checked_out' && inPeriod(b.checkOutDate)).length;
 
-    // Financial calculations
-    const roomRevenue = targetRooms
-      .filter((r) => r.status === 'occupied')
-      .reduce((sum, r) => sum + r.ratePerNight, 0);
+      // Money within the period: bills issued in the period (and what was paid on them),
+      // plus advances taken on bookings made in the period that have no bill yet.
+      const periodFolios = folios.filter((f) => inPeriod(f.createdAt));
+      const billed = periodFolios.reduce((s, f) => s + (f.totalAmount || 0), 0);
+      const folioPaid = periodFolios.reduce((s, f) => s + (f.paidAmount || 0), 0);
+      const billedBookings = new Set(folios.map((f) => f.bookingId));
+      const advancesWithoutBill = bookings
+        .filter((b) => !billedBookings.has(b.id) && inPeriod(b.createdAt))
+        .reduce((s, b) => s + (b.depositPaid || 0), 0);
+      const collections = Math.round(folioPaid + advancesWithoutBill);
+      const expensesTotal = Math.round(expenses.filter((e) => inPeriod(e.date)).reduce((s, e) => s + e.amount, 0));
 
-    const folioSettledRevenue = targetFolios
-      .filter((f) => f.status === 'settled')
-      .reduce((sum, f) => sum + f.totalAmount, 0);
+      // Dues: everything still open now
+      const outstanding = Math.round(folios.filter((f) => f.status === 'open').reduce((s, f) => s + (f.balanceDue || 0), 0));
 
-    // Total Revenue
-    const totalRevenue = Math.round(roomRevenue + folioSettledRevenue);
+      return {
+        totalRooms,
+        occupiedRooms,
+        availableRooms,
+        cleaningRooms,
+        occupancyRate: totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0,
+        checkIns,
+        checkOuts,
+        billed: Math.round(billed),
+        collections,
+        expensesTotal,
+        outstanding,
+      };
+    };
 
-    // Actual Collections (Advance from bookings + Paid from folios)
-    const bookingAdvances = targetBookings.reduce((sum, b) => sum + (b.depositPaid || 0), 0);
-    const folioPaid = targetFolios.reduce((sum, f) => sum + (f.paidAmount || 0), 0);
-    const actualCollections = Math.round(bookingAdvances * 0.4 + folioPaid);
-
-    // Outstanding Payments
-    const outstandingPayments = targetFolios
-      .filter((f) => f.status === 'open')
-      .reduce((sum, f) => sum + f.balanceDue, 0);
-
-    // Total Expenses
-    const totalExpenses = targetExpenses.reduce((sum, e) => sum + e.amount, 0);
-
-    // Net Cashflow / Operating Profit = Collections - Expenses
-    const netProfit = actualCollections - totalExpenses;
-
-    // Hotel-wise breakdown for comparison
+    const all = compute(targetHotelIds);
     const perHotelBreakdown = filteredHotels.map((h) => {
-      const hRooms = allRooms.filter((r) => r.hotelId === h.id);
-      const hOcc = hRooms.filter((r) => r.status === 'occupied').length;
-      const hFolios = allFolios.filter((f) => f.hotelId === h.id);
-      const hExp = allExpenses.filter((e) => e.hotelId === h.id);
-
-      const hCol = hFolios.reduce((sum, f) => sum + f.paidAmount, 0);
-      const hExpTotal = hExp.reduce((sum, e) => sum + e.amount, 0);
-      const hOut = hFolios.filter((f) => f.status === 'open').reduce((sum, f) => sum + f.balanceDue, 0);
-
+      const m = compute([h.id]);
       return {
         id: h.id,
         name: h.name,
-        totalRooms: hRooms.length,
-        occupiedRooms: hOcc,
-        occupancy: hRooms.length > 0 ? Math.round((hOcc / hRooms.length) * 100) : 0,
-        collections: hCol,
-        expenses: hExpTotal,
-        profit: hCol - hExpTotal,
-        outstanding: hOut,
+        totalRooms: m.totalRooms,
+        occupiedRooms: m.occupiedRooms,
+        occupancy: m.occupancyRate,
+        collections: m.collections,
+        expenses: m.expensesTotal,
+        profit: m.collections - m.expensesTotal,
+        outstanding: m.outstanding,
       };
     });
 
     return {
-      totalRooms,
-      occupiedRooms,
-      availableRooms,
-      cleaningRooms,
-      occupancyRate,
-      todayCheckIns,
-      todayCheckOuts,
-      totalRevenue,
-      actualCollections,
-      outstandingPayments,
-      totalExpenses,
-      netProfit,
+      totalRooms: all.totalRooms,
+      occupiedRooms: all.occupiedRooms,
+      availableRooms: all.availableRooms,
+      cleaningRooms: all.cleaningRooms,
+      occupancyRate: all.occupancyRate,
+      todayCheckIns: all.checkIns,
+      todayCheckOuts: all.checkOuts,
+      totalRevenue: all.billed,
+      actualCollections: all.collections,
+      outstandingPayments: all.outstanding,
+      totalExpenses: all.expensesTotal,
+      netProfit: all.collections - all.expensesTotal,
       perHotelBreakdown,
     };
-  }, [selectedHotelId, hotels, allRooms, allBookings, allFolios, allExpenses]);
+  }, [selectedHotelId, hotels, allRooms, allBookings, allFolios, allExpenses, period]);
 
   // Export / Share Report Handler
   const handleShareReport = async () => {
     const propertyLabel =
       selectedHotelId === 'all'
         ? 'All Properties (THE VILLA + NAVKAR PALACE & RESORT)'
-        : hotels.find((h) => h.id === selectedHotelId)?.name || 'ResortOS Property';
+        : hotels.find((h) => h.id === selectedHotelId)?.name || 'Guest Book Property';
 
     const reportText = `==============================
-RESORTOS DAILY SUMMARY REPORT
+GUEST BOOK DAILY SUMMARY REPORT
 ==============================
-Date: 17 Nov 2026
+Period: ${period.label} (${period.reportDate})
 Property: ${propertyLabel}
 Generated By: ${currentUser?.fullName || 'Admin Owner'}
 
@@ -158,11 +202,11 @@ Total Rooms: ${metrics.totalRooms}
 Occupied Rooms: ${metrics.occupiedRooms} (${metrics.occupancyRate}%)
 Available Rooms: ${metrics.availableRooms}
 Cleaning / Turnover: ${metrics.cleaningRooms}
-Today's Check-ins: ${metrics.todayCheckIns}
-Today's Check-outs: ${metrics.todayCheckOuts}
+Check-ins: ${metrics.todayCheckIns}
+Check-outs: ${metrics.todayCheckOuts}
 
 --- FINANCIAL AUDIT ---
-Gross Revenue: ₹ ${metrics.totalRevenue.toLocaleString('en-IN')}
+Billed: ₹ ${metrics.totalRevenue.toLocaleString('en-IN')}
 Actual Collections: ₹ ${metrics.actualCollections.toLocaleString('en-IN')}
 Pending / Outstanding: ₹ ${metrics.outstandingPayments.toLocaleString('en-IN')}
 Total Expenses: -₹ ${metrics.totalExpenses.toLocaleString('en-IN')}
@@ -172,7 +216,7 @@ NET OPERATING PROFIT: ₹ ${metrics.netProfit.toLocaleString('en-IN')}
 
     try {
       await Share.share({
-        title: `ResortOS Daily Summary - 17 Nov 2026`,
+        title: `Guest Book Daily Summary - ${period.reportDate}`,
         message: reportText,
       });
     } catch {
@@ -266,7 +310,7 @@ NET OPERATING PROFIT: ₹ ${metrics.netProfit.toLocaleString('en-IN')}
         {/* Date Filter Tabs */}
         <View style={styles.dateFilterRow}>
           {[
-            { id: 'today', label: 'Today (17 Nov)' },
+            { id: 'today', label: dateFilter === 'today' ? period.label : 'Today' },
             { id: 'yesterday', label: 'Yesterday' },
             { id: 'last7', label: 'Last 7 Days' },
             { id: 'month', label: 'Month to Date' },
@@ -470,9 +514,9 @@ NET OPERATING PROFIT: ₹ ${metrics.netProfit.toLocaleString('en-IN')}
 
           <ScrollView contentContainerStyle={styles.printSheet}>
             <View style={styles.printHeader}>
-              <Text style={styles.printBrand}>ResortOS Management</Text>
+              <Text style={styles.printBrand}>Guest Book • Hotel Check-in Software</Text>
               <Text style={styles.printDocTitle}>DAILY EXECUTIVE P&L STATEMENT</Text>
-              <Text style={styles.printDate}>Date of Audit: 17 November 2026</Text>
+              <Text style={styles.printDate}>Period: {period.label} ({period.reportDate})</Text>
               <Text style={styles.printProperty}>
                 Property:{' '}
                 {selectedHotelId === 'all'

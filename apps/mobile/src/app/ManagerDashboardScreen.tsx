@@ -147,7 +147,7 @@ export const ManagerDashboardScreen: React.FC = () => {
     ]);
   };
 
-  // 8 Core Manager Operations Modules
+  // 6 Manager modules (salary advances, payroll and the daily summary are admin-only)
   const managerModules: { id: string; title: string; subtitle: string; icon: IconName; screen: any; color: string }[] = [
     {
       id: 'mod-rooms',
@@ -190,28 +190,12 @@ export const ManagerDashboardScreen: React.FC = () => {
       color: '#2563EB',
     },
     {
-      id: 'mod-salary-advances',
-      title: '6. Salary Advances',
-      subtitle: 'Staff advance loan requests & approvals',
-      icon: 'dollar-sign',
-      screen: 'salary-advances',
-      color: '#0D9488',
-    },
-    {
       id: 'mod-expenses',
-      title: '7. Daily Expenses',
+      title: '6. Daily Expenses',
       subtitle: 'Record daily property expenses (Supplies, repairs, bills)',
       icon: 'trending-down',
       screen: 'daily-expenses',
       color: '#DC2626',
-    },
-    {
-      id: 'mod-reports',
-      title: '8. Daily Summary Report',
-      subtitle: 'Daily hotel occupancy, collections & room audit',
-      icon: 'bar-chart-2',
-      screen: 'daily-summary',
-      color: '#3B82F6',
     },
   ];
 

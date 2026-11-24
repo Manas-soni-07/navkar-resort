@@ -15,6 +15,7 @@ import {
   Platform,
   TouchableOpacity,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { colors } from '../theme/colors';
 import { typography } from '../theme/typography';
@@ -129,11 +130,12 @@ export const LoginScreen: React.FC = () => {
         >
           {/* Brand Header */}
           <View style={styles.brandContainer}>
-            <View style={styles.brandIconWrapper}>
-              <Icon name="hotel" size={32} color={colors.primaryNavy} />
-            </View>
-            <Text style={styles.brandTitle}>ResortOS</Text>
-            <Text style={styles.brandSubtitle}>HOTEL & RESORT MANAGEMENT APPLICATION</Text>
+            <Image
+              source={require('../../assets/guestbook-logo.png')}
+              style={styles.logoImage}
+              resizeMode="contain"
+              accessibilityLabel="Guest Book - Hotel Check-in Software"
+            />
             <View style={styles.propertiesTag}>
               <Text style={styles.propertiesText}>THE VILLA  •  NAVKAR PALACE & RESORT</Text>
             </View>
@@ -303,7 +305,7 @@ export const LoginScreen: React.FC = () => {
 
           {/* Footer Branding */}
           <Text style={styles.footerNote}>
-            ResortOS v2.0 • Designed for Simple & Reliable Hotel Management
+            Guest Book v1.5 • Hotel Check-in Software
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -312,6 +314,12 @@ export const LoginScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  logoImage: {
+    width: 220,
+    height: 172,
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: '#F8FAFC',

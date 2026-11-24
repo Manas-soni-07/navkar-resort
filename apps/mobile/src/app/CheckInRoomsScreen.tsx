@@ -33,6 +33,7 @@ import { Button } from '../components/common/Button';
 import { formatCurrency } from '../utils/formatters';
 import { Room, Booking, IdProofType } from '../types/hotel';
 import { apiClient } from '../services/apiClient';
+import { ExportGuestsModal } from '../components/documents/ExportGuestsModal';
 import { DocumentsModal } from '../components/documents/DocumentsModal';
 
 interface ExtraChargeItem {
@@ -54,6 +55,8 @@ export const CheckInRoomsScreen: React.FC = () => {
     createBooking,
     isRoomAvailable,
     reassignRoom,
+    currentUser,
+    hotels,
   } = useHotel();
 
   const [activeTab, setActiveTab] = useState<'arrivals' | 'inventory'>(
@@ -276,7 +279,7 @@ export const CheckInRoomsScreen: React.FC = () => {
         hotelId: selectedHotel.id,
         guestName: walkInGuestName.trim(),
         guestPhone: walkInPhone.trim(),
-        guestEmail: `${walkInGuestName.toLowerCase().replace(/\s+/g, '')}@gmail.com`,
+        guestEmail: '', // walk-in form has no email field; don't invent one
         roomCategory: selectedWalkInRoom.category,
         roomId: selectedWalkInRoom.id,
         roomNumber: selectedWalkInRoom.roomNumber,
@@ -462,36 +465,11 @@ export const CheckInRoomsScreen: React.FC = () => {
     Alert.alert('Room Cleaned', `Room ${roomNum} is now inspected and Available for check-in.`);
   };
 
-  // Complete Historical Guest Export Handler
-  const [exporting, setExporting] = useState<boolean>(false);
-
-  const handleExportGuests = async () => {
-    setExporting(true);
-    try {
-      const summary = await apiClient.getGuestExportSummary(selectedHotel.id);
-      const exportUrl = await apiClient.getGuestExportUrl(selectedHotel.id);
-
-      Alert.alert(
-        'Export Historical Guest Records',
-        `Property: ${summary.hotelName}\nTotal Records: ${summary.totalRecords} guests\n\nDownload complete historical Excel workbook?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Download Excel (.xlsx)',
-            onPress: () => {
-              Linking.openURL(exportUrl).catch((err) => {
-                Alert.alert('Download Error', `Could not open browser: ${err.message}`);
-              });
-            },
-          },
-        ]
-      );
-    } catch (err: any) {
-      Alert.alert('Export Failed', err.message || 'Unable to retrieve guest export.');
-    } finally {
-      setExporting(false);
-    }
-  };
+  // Guest register export (admin-only): opens the hotel / period / fields chooser.
+  const [exporting] = useState<boolean>(false);
+  const [showExport, setShowExport] = useState<boolean>(false);
+  const isAdmin = currentUser?.role === 'ADMIN';
+  const handleExportGuests = () => setShowExport(true);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -503,15 +481,17 @@ export const CheckInRoomsScreen: React.FC = () => {
         onBack={goBack}
         rightAction={
           <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-            <TouchableOpacity
-              style={styles.exportHeaderBtn}
-              onPress={handleExportGuests}
-              disabled={exporting}
-              activeOpacity={0.8}
-            >
-              <Icon name="download" size={13} color={colors.primaryNavy} />
-              <Text style={styles.exportHeaderBtnText}>Excel</Text>
-            </TouchableOpacity>
+            {isAdmin && (
+              <TouchableOpacity
+                style={styles.exportHeaderBtn}
+                onPress={handleExportGuests}
+                disabled={exporting}
+                activeOpacity={0.8}
+              >
+                <Icon name="download" size={13} color={colors.primaryNavy} />
+                <Text style={styles.exportHeaderBtnText}>Excel</Text>
+              </TouchableOpacity>
+            )}
             <Button
               title="+ Walk-in"
               size="sm"
@@ -779,6 +759,13 @@ export const CheckInRoomsScreen: React.FC = () => {
       {/* ============================================================== */}
       {/* WALK-IN CHECK-IN MODAL (ALL 12 MANDATED FIELDS)                */}
       {/* ============================================================== */}
+      <ExportGuestsModal
+        visible={showExport}
+        onClose={() => setShowExport(false)}
+        hotels={hotels}
+        initialHotelId={selectedHotel.id}
+      />
+
       <DocumentsModal
         visible={!!docsBooking}
         onClose={() => setDocsBooking(null)}

@@ -8,6 +8,8 @@ import { generateToken, isAdminRole } from '@/lib/auth';
 import { MobileRouter } from './router';
 import { signGuestExportToken } from './downloadLink';
 import { registerDocumentRoutes } from './documentRoutes';
+import { registerReportRoutes, parseExportParams } from './reportRoutes';
+import { registerSalaryRoutes } from './salaryRoutes';
 import type { MobileContext } from './context';
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -32,14 +34,16 @@ export function buildSecureRoutes(ctx: MobileContext): MobileRouter {
   // Signed 5-minute link for the Excel guest export (opened in the phone's browser).
   // The access policy has already checked/pinned req.query.hotelId for this user.
   router.get('/reports/guests/export-link', async (req, res) => {
-    const hotelId = req.query.hotelId;
-    if (!hotelId || hotelId === 'all') {
-      return res.status(400).json({ error: 'Please choose a specific hotel to export.' });
-    }
-    const token = await signGuestExportToken(user.id, hotelId);
-    const url = `${ctx.origin}/api/m/reports/guests/export?hotelId=${encodeURIComponent(hotelId)}&dl=${encodeURIComponent(token)}`;
-    res.json({ url, expiresInSeconds: 300 });
+    const p = parseExportParams(req.query);
+    if ('error' in p) return res.status(400).json({ error: p.error });
+    const token = await signGuestExportToken(user.id, p.hotelId);
+    const qs = new URLSearchParams({ hotelId: p.hotelId, fields: p.fields.join(','), dl: token });
+    if (p.from) qs.set('from', p.from);
+    if (p.to) qs.set('to', p.to);
+    res.json({ url: `${ctx.origin}/api/m/reports/guests/export?${qs.toString()}`, expiresInSeconds: 300 });
   });
+  registerReportRoutes(router, ctx);
+  registerSalaryRoutes(router, ctx);
 
   router.post('/managers', async (req, res) => {
     const { fullName, email, phone, hotelId, initialPassword } = req.body ?? {};

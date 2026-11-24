@@ -29,7 +29,7 @@ export const RoleSelectionScreen: React.FC = () => {
           <View style={styles.brandIconSmall}>
             <Icon name="hotel" size={24} color={colors.primaryNavy} />
           </View>
-          <Text style={styles.headerTitle}>ResortOS Access</Text>
+          <Text style={styles.headerTitle}>Guest Book Access</Text>
           <Text style={styles.headerSubtitle}>
             Select your administrative level to continue to the authentication gateway.
           </Text>

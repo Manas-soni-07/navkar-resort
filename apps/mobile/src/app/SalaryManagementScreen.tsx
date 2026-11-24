@@ -46,7 +46,9 @@ interface StaffSalaryRow {
 export const SalaryManagementScreen: React.FC = () => {
   const { goBack, navigate } = useNavigation();
 
-  const [selectedMonth, setSelectedMonth] = useState('November 2026');
+  const [selectedMonth, setSelectedMonth] = useState(
+    new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', month: 'long', year: 'numeric' }).format(new Date())
+  );
   const [filterHotel, setFilterHotel] = useState<'all' | 'h-villa' | 'h-navkar'>('all');
   const [payrollRows, setPayrollRows] = useState<StaffSalaryRow[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -106,8 +108,6 @@ export const SalaryManagementScreen: React.FC = () => {
                 staffId,
                 hotelId,
                 netAmount,
-                month: 11,
-                year: 2026,
               });
               await fetchSalaries();
             } catch (err: any) {

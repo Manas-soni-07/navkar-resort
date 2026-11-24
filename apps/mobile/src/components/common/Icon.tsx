@@ -85,6 +85,7 @@ export type IconName =
   | 'search'
   | 'share-2'
   | 'file-text'
+  | 'download'
   | 'circle';
 
 interface IconProps {

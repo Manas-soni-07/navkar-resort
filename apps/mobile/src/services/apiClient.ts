@@ -28,6 +28,21 @@ import {
 } from '../types/hotel';
 import { apiConfig, NetworkConfig } from '../config/apiConfig';
 
+export interface GuestExportField {
+  key: string;
+  label: string;
+  group: 'Guest' | 'Stay' | 'Payment' | 'Other';
+  default: boolean;
+}
+
+export interface GuestExportOptions {
+  hotelId: string;
+  /** YYYY-MM-DD, by check-in date (inclusive) */
+  from?: string;
+  to?: string;
+  fields?: string[];
+}
+
 export interface StoredDocument {
   id: string;
   docType: string;
@@ -266,20 +281,33 @@ export class ApiClient {
    * The browser that downloads the file cannot send our Authorization header, so the server
    * issues a short-lived (5 min), single-hotel signed download link instead.
    */
-  public async getGuestExportUrl(hotelId: string): Promise<string> {
-    const res = await this.request<{ url: string }>(`/reports/guests/export-link?hotelId=${encodeURIComponent(hotelId)}`);
+  private exportQuery(o: GuestExportOptions): string {
+    const q = new URLSearchParams({ hotelId: o.hotelId });
+    if (o.from) q.set('from', o.from);
+    if (o.to) q.set('to', o.to);
+    if (o.fields?.length) q.set('fields', o.fields.join(','));
+    return q.toString();
+  }
+
+  /** Columns the admin can choose from (every field the check-in form collects). */
+  public async getGuestExportFields(): Promise<GuestExportField[]> {
+    return this.request('/reports/guests/fields');
+  }
+
+  public async getGuestExportUrl(o: GuestExportOptions): Promise<string> {
+    const res = await this.request<{ url: string }>(`/reports/guests/export-link?${this.exportQuery(o)}`);
     return res.url;
   }
 
-  public async getGuestExportSummary(hotelId: string): Promise<{
+  public async getGuestExportSummary(o: GuestExportOptions): Promise<{
     success: boolean;
     hotelId: string;
     hotelName: string;
+    period: string;
     totalRecords: number;
-    exportedAt: string;
-    records: any[];
+    records: Record<string, unknown>[];
   }> {
-    return this.request(`/reports/guests/export?hotelId=${encodeURIComponent(hotelId)}&format=json`);
+    return this.request(`/reports/guests/export?${this.exportQuery(o)}&format=json`);
   }
 
   /** Validates the current token and returns the signed-in user as the server sees it. */
